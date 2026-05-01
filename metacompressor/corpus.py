@@ -21,6 +21,7 @@ from metacompressor.container import (
     serialise_dir,
     deserialise_dir,
 )
+from metacompressor.delta import delta_encoded_size, find_similar_chunk
 from metacompressor.utils import CHUNK_SIZE, chunk_data, hash_chunk
 
 
@@ -61,6 +62,8 @@ def compress_corpus(input_dir: Path, chunk_size: int = CHUNK_SIZE) -> bytes:
 
     hash_to_id: dict[str, int] = {}
     container = MC1DirContainer(chunk_size=chunk_size)
+    # Insertion-order list of full-chunk IDs (delta base candidates).
+    full_id_order: list[int] = []
     next_id = 0
 
     # Collect files in a deterministic order (sorted by relative path).
@@ -76,9 +79,23 @@ def compress_corpus(input_dir: Path, chunk_size: int = CHUNK_SIZE) -> bytes:
         for chunk in chunk_data(data, chunk_size):
             h = hash_chunk(chunk)
             if h not in hash_to_id:
-                hash_to_id[h] = next_id
-                container.chunks[next_id] = chunk
+                cid = next_id
                 next_id += 1
+                hash_to_id[h] = cid
+
+                # Attempt delta encoding against recent full chunks.
+                delta_result = find_similar_chunk(chunk, container.chunks, full_id_order)
+                if delta_result is not None:
+                    base_id, diffs = delta_result
+                    if delta_encoded_size(diffs) < len(chunk):
+                        container.delta_chunks[cid] = (base_id, len(chunk), diffs)
+                        sequence.append(cid)
+                        continue
+
+                # Fall back to storing the full chunk.
+                container.chunks[cid] = chunk
+                full_id_order.append(cid)
+
             sequence.append(hash_to_id[h])
 
         container.files.append(FileEntry(path=rel_path, sequence=sequence))
