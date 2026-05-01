@@ -25,7 +25,11 @@ from metacompressor.delta import delta_encoded_size, find_similar_chunk
 from metacompressor.utils import CHUNK_SIZE, chunk_data, hash_chunk
 
 
-def compress_corpus(input_dir: Path, chunk_size: int = CHUNK_SIZE) -> bytes:
+def compress_corpus(
+    input_dir: Path,
+    chunk_size: int = CHUNK_SIZE,
+    use_delta: bool = True,
+) -> bytes:
     """Compress all files under *input_dir* into a single .mc1dir byte string.
 
     Files are walked recursively and stored with their paths relative to
@@ -45,6 +49,11 @@ def compress_corpus(input_dir: Path, chunk_size: int = CHUNK_SIZE) -> bytes:
     chunk_size:
         Size of each chunk in bytes (default: 4096).  Must be the same value
         for compress and decompress; the value is embedded in the archive.
+    use_delta:
+        When ``True`` (default), attempt intra-chunk delta encoding for
+        near-duplicate chunks.  Set to ``False`` to disable delta encoding
+        and store every unique chunk verbatim — useful for benchmarking or
+        when the corpus is known to have low cross-chunk similarity.
 
     Returns
     -------
@@ -84,13 +93,14 @@ def compress_corpus(input_dir: Path, chunk_size: int = CHUNK_SIZE) -> bytes:
                 hash_to_id[h] = cid
 
                 # Attempt delta encoding against recent full chunks.
-                delta_result = find_similar_chunk(chunk, container.chunks, full_id_order)
-                if delta_result is not None:
-                    base_id, diffs = delta_result
-                    if delta_encoded_size(diffs) < len(chunk):
-                        container.delta_chunks[cid] = (base_id, len(chunk), diffs)
-                        sequence.append(cid)
-                        continue
+                if use_delta:
+                    delta_result = find_similar_chunk(chunk, container.chunks, full_id_order)
+                    if delta_result is not None:
+                        base_id, diffs = delta_result
+                        if delta_encoded_size(diffs) < len(chunk):
+                            container.delta_chunks[cid] = (base_id, len(chunk), diffs)
+                            sequence.append(cid)
+                            continue
 
                 # Fall back to storing the full chunk.
                 container.chunks[cid] = chunk

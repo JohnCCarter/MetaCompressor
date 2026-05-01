@@ -191,10 +191,10 @@ def measure_tar_zstd(corpus_dir: Path) -> tuple[int, float]:
     return len(compressed), elapsed
 
 
-def measure_mc_corpus(corpus_dir: Path) -> tuple[int, float]:
+def measure_mc_corpus(corpus_dir: Path, use_delta: bool = True) -> tuple[int, float]:
     """MetaCompressor corpus mode (.mc1dir)."""
     t0 = time.perf_counter()
-    mc_bytes = compress_corpus(corpus_dir)
+    mc_bytes = compress_corpus(corpus_dir, use_delta=use_delta)
     elapsed = time.perf_counter() - t0
     return len(mc_bytes), elapsed
 
@@ -229,44 +229,61 @@ def run_benchmark(corpus_dir: Path) -> None:
 
     print("\n=== Compressing ===")
 
-    print("  [1/3] ZSTD per file … ", end="", flush=True)
+    print("  [1/4] ZSTD per file … ", end="", flush=True)
     zstd_size, zstd_time = measure_zstd_per_file(corpus_dir)
     print(f"{_fmt_size(zstd_size)}  ({zstd_time:.3f}s)")
 
-    print("  [2/3] TAR + ZSTD … ", end="", flush=True)
+    print("  [2/4] TAR + ZSTD … ", end="", flush=True)
     tar_size, tar_time = measure_tar_zstd(corpus_dir)
     print(f"{_fmt_size(tar_size)}  ({tar_time:.3f}s)")
 
-    print("  [3/3] MC compress-dir (.mc1dir) … ", end="", flush=True)
-    mc_size, mc_time = measure_mc_corpus(corpus_dir)
-    print(f"{_fmt_size(mc_size)}  ({mc_time:.3f}s)")
+    print("  [3/4] MC compress-dir (no delta) … ", end="", flush=True)
+    mc_nd_size, mc_nd_time = measure_mc_corpus(corpus_dir, use_delta=False)
+    print(f"{_fmt_size(mc_nd_size)}  ({mc_nd_time:.3f}s)")
+
+    print("  [4/4] MC compress-dir (+ delta) … ", end="", flush=True)
+    mc_delta_size, mc_delta_time = measure_mc_corpus(corpus_dir, use_delta=True)
+    print(f"{_fmt_size(mc_delta_size)}  ({mc_delta_time:.3f}s)")
 
     def ratio(compressed: int) -> str:
         return f"{raw_size / compressed:.2f}x"
 
-    col_w = 28
+    col_w = 32
     print()
-    print("=" * 68)
+    print("=" * 76)
     print(f"{'Method':<{col_w}} {'Size':>10} {'Ratio':>8} {'Time':>8}  Delta vs TAR+ZSTD")
-    print("-" * 68)
+    print("-" * 76)
     print(f"{'Raw (uncompressed)':<{col_w}} {_fmt_size(raw_size):>10} {'1.00x':>8} {'—':>8}  —")
     print(f"{'ZSTD per file':<{col_w}} {_fmt_size(zstd_size):>10} {ratio(zstd_size):>8} {zstd_time:>7.3f}s  {_fmt_delta(zstd_size, tar_size)}")
     print(f"{'TAR + ZSTD (baseline)':<{col_w}} {_fmt_size(tar_size):>10} {ratio(tar_size):>8} {tar_time:>7.3f}s  (baseline)")
-    print(f"{'MC compress-dir':<{col_w}} {_fmt_size(mc_size):>10} {ratio(mc_size):>8} {mc_time:>7.3f}s  {_fmt_delta(mc_size, tar_size)}")
-    print("=" * 68)
+    print(f"{'MC compress-dir (no delta)':<{col_w}} {_fmt_size(mc_nd_size):>10} {ratio(mc_nd_size):>8} {mc_nd_time:>7.3f}s  {_fmt_delta(mc_nd_size, tar_size)}")
+    print(f"{'MC compress-dir (+ delta)':<{col_w}} {_fmt_size(mc_delta_size):>10} {ratio(mc_delta_size):>8} {mc_delta_time:>7.3f}s  {_fmt_delta(mc_delta_size, tar_size)}")
+    print("=" * 76)
+
+    delta_gain_bytes = mc_nd_size - mc_delta_size
+    delta_gain_pct = delta_gain_bytes / mc_nd_size * 100 if mc_nd_size else 0.0
 
     print()
-    if mc_size < tar_size:
-        saving_bytes = tar_size - mc_size
-        saving_pct = saving_bytes / tar_size * 100
-        print(f"CORPUS_EDGE_FOUND")
-        print(f"  MC is {_fmt_size(saving_bytes)} ({saving_pct:.1f}%) smaller than TAR+ZSTD")
+    print("--- Delta encoding impact ---")
+    if delta_gain_bytes > 0:
+        print(f"  Delta saves {_fmt_size(delta_gain_bytes)} ({delta_gain_pct:.1f}%) over MC (no delta)")
+    elif delta_gain_bytes < 0:
+        print(f"  Delta adds {_fmt_size(-delta_gain_bytes)} ({-delta_gain_pct:.1f}%) overhead vs MC (no delta)")
     else:
-        overhead_bytes = mc_size - tar_size
+        print("  Delta had no effect on this corpus")
+
+    print()
+    if mc_delta_size < tar_size:
+        saving_bytes = tar_size - mc_delta_size
+        saving_pct = saving_bytes / tar_size * 100
+        print("CORPUS_EDGE_FOUND")
+        print(f"  MC (+ delta) is {_fmt_size(saving_bytes)} ({saving_pct:.1f}%) smaller than TAR+ZSTD")
+    else:
+        overhead_bytes = mc_delta_size - tar_size
         overhead_pct = overhead_bytes / tar_size * 100
-        print(f"NO_EDGE")
+        print("NO_EDGE")
         print(
-            f"  MC is {_fmt_size(overhead_bytes)} ({overhead_pct:.1f}%) LARGER than TAR+ZSTD.\n"
+            f"  MC (+ delta) is {_fmt_size(overhead_bytes)} ({overhead_pct:.1f}%) LARGER than TAR+ZSTD.\n"
             f"  Explanation: The cross-file deduplication savings from the shared chunk\n"
             f"  dictionary do not outweigh the overhead of the msgpack container and\n"
             f"  chunk-boundary fragmentation on this corpus.  TAR+ZSTD benefits from\n"
