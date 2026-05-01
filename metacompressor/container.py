@@ -44,8 +44,10 @@ VERSION_DIR = 0x01
 @dataclass
 class MC1Container:
     chunk_size: int
-    chunks: Dict[int, bytes] = field(default_factory=dict)   # chunk_id → raw bytes
+    chunks: Dict[int, bytes] = field(default_factory=dict)   # chunk_id → raw bytes (full chunks)
     sequence: List[int] = field(default_factory=list)        # ordered chunk_ids
+    # chunk_id → (base_chunk_id, target_len, [[offset, byte], …])
+    delta_chunks: Dict[int, tuple] = field(default_factory=dict)
 
 
 def serialise(container: MC1Container) -> bytes:
@@ -57,6 +59,12 @@ def serialise(container: MC1Container) -> bytes:
         "chunks": [[cid, data] for cid, data in sorted_chunks],
         "sequence": container.sequence,
     }
+    if container.delta_chunks:
+        payload["delta_chunks"] = [
+            [cid, base_cid, target_len, diffs]
+            for cid, (base_cid, target_len, diffs)
+            in sorted(container.delta_chunks.items())
+        ]
     raw = msgpack.packb(payload, use_bin_type=True)
     cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
     compressed = cctx.compress(raw)
@@ -87,6 +95,15 @@ def deserialise(data: bytes) -> MC1Container:
     chunks: Dict[int, bytes] = {
         cid: bytes(chunk_data) for cid, chunk_data in payload["chunks"]
     }
+    if "delta_chunks" in payload:
+        from metacompressor.delta import apply_delta
+        for entry in payload["delta_chunks"]:
+            cid, base_cid, target_len, raw_diffs = entry[0], entry[1], entry[2], entry[3]
+            if base_cid not in chunks:
+                raise ValueError(
+                    f"Delta chunk {cid} references unknown base chunk {base_cid}"
+                )
+            chunks[cid] = apply_delta(chunks[base_cid], raw_diffs, target_len)
     sequence: List[int] = payload["sequence"]
     return MC1Container(chunk_size=chunk_size, chunks=chunks, sequence=sequence)
 
@@ -105,8 +122,10 @@ class FileEntry:
 @dataclass
 class MC1DirContainer:
     chunk_size: int
-    chunks: Dict[int, bytes] = field(default_factory=dict)  # shared chunk dict
+    chunks: Dict[int, bytes] = field(default_factory=dict)  # shared full chunk dict
     files: List[FileEntry] = field(default_factory=list)    # per-file entries
+    # chunk_id → (base_chunk_id, target_len, [[offset, byte], …])
+    delta_chunks: Dict[int, tuple] = field(default_factory=dict)
 
 
 def serialise_dir(container: MC1DirContainer) -> bytes:
@@ -120,6 +139,12 @@ def serialise_dir(container: MC1DirContainer) -> bytes:
             for f in container.files
         ],
     }
+    if container.delta_chunks:
+        payload["delta_chunks"] = [
+            [cid, base_cid, target_len, diffs]
+            for cid, (base_cid, target_len, diffs)
+            in sorted(container.delta_chunks.items())
+        ]
     raw = msgpack.packb(payload, use_bin_type=True)
     cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
     compressed = cctx.compress(raw)
@@ -150,6 +175,15 @@ def deserialise_dir(data: bytes) -> MC1DirContainer:
     chunks: Dict[int, bytes] = {
         cid: bytes(chunk_bytes) for cid, chunk_bytes in payload["chunks"]
     }
+    if "delta_chunks" in payload:
+        from metacompressor.delta import apply_delta
+        for entry in payload["delta_chunks"]:
+            cid, base_cid, target_len, raw_diffs = entry[0], entry[1], entry[2], entry[3]
+            if base_cid not in chunks:
+                raise ValueError(
+                    f"Delta chunk {cid} references unknown base chunk {base_cid}"
+                )
+            chunks[cid] = apply_delta(chunks[base_cid], raw_diffs, target_len)
     files: List[FileEntry] = [
         FileEntry(path=entry["path"], sequence=list(entry["sequence"]))
         for entry in payload["files"]
