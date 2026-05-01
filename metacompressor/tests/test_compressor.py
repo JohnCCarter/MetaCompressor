@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from metacompressor.compressor import compress
+from metacompressor.compressor import compress, CHUNKING_FIXED, CHUNKING_CDC
 from metacompressor.decompressor import decompress
 
 
@@ -14,12 +14,16 @@ from metacompressor.decompressor import decompress
 # Helpers
 # ---------------------------------------------------------------------------
 
-def round_trip(data: bytes) -> bytes:
-    return decompress(compress(data))
+def round_trip(data: bytes, **kwargs) -> bytes:
+    return decompress(compress(data, **kwargs))
+
+
+def round_trip_cdc(data: bytes) -> bytes:
+    return round_trip(data, chunking_mode=CHUNKING_CDC)
 
 
 # ---------------------------------------------------------------------------
-# Core round-trip tests
+# Core round-trip tests (fixed chunking – unchanged)
 # ---------------------------------------------------------------------------
 
 class TestRoundTrip:
@@ -65,7 +69,7 @@ class TestRoundTrip:
 
 
 # ---------------------------------------------------------------------------
-# Determinism tests
+# Determinism tests (fixed)
 # ---------------------------------------------------------------------------
 
 class TestDeterminism:
@@ -80,7 +84,7 @@ class TestDeterminism:
 
 
 # ---------------------------------------------------------------------------
-# Deduplication tests
+# Deduplication tests (fixed)
 # ---------------------------------------------------------------------------
 
 class TestDeduplication:
@@ -117,3 +121,119 @@ class TestErrorHandling:
         corrupted = mc1[:5] + bytes(b ^ 0xFF for b in mc1[5:])
         with pytest.raises((ValueError, Exception)):
             decompress(corrupted)
+
+
+# ---------------------------------------------------------------------------
+# CDC round-trip tests
+# ---------------------------------------------------------------------------
+
+class TestCDCRoundTrip:
+    def test_empty_file(self):
+        assert round_trip_cdc(b"") == b""
+
+    def test_small_file_below_min_chunk_size(self):
+        """File smaller than CDC min_chunk_size must still round-trip."""
+        data = b"Hello, CDC MetaCompressor!"
+        assert round_trip_cdc(data) == data
+
+    def test_single_byte(self):
+        assert round_trip_cdc(b"\xab") == b"\xab"
+
+    def test_multiple_chunks(self):
+        data = os.urandom(4096 * 10 + 777)
+        assert round_trip_cdc(data) == data
+
+    def test_text_file(self):
+        data = ("The quick brown fox jumps over the lazy dog.\n" * 1000).encode()
+        assert round_trip_cdc(data) == data
+
+    def test_log_like_file(self):
+        lines = [
+            f"2024-01-01T00:00:{i:02d}Z INFO server started request_id={i}\n"
+            for i in range(500)
+        ]
+        data = "".join(lines).encode()
+        assert round_trip_cdc(data) == data
+
+    def test_repeated_content(self):
+        chunk = b"B" * 4096
+        data = chunk * 50
+        assert round_trip_cdc(data) == data
+
+    def test_binary_data(self):
+        data = bytes(range(256)) * 400
+        assert round_trip_cdc(data) == data
+
+
+# ---------------------------------------------------------------------------
+# CDC determinism tests
+# ---------------------------------------------------------------------------
+
+class TestCDCDeterminism:
+    def test_same_input_same_output(self):
+        data = b"cdc determinism check " * 300
+        c1 = compress(data, chunking_mode=CHUNKING_CDC)
+        c2 = compress(data, chunking_mode=CHUNKING_CDC)
+        assert c1 == c2
+
+    def test_different_inputs_differ(self):
+        a = compress(b"cdc_aaa" * 2000, chunking_mode=CHUNKING_CDC)
+        b = compress(b"cdc_bbb" * 2000, chunking_mode=CHUNKING_CDC)
+        assert a != b
+
+    def test_fixed_and_cdc_produce_different_containers(self):
+        """CDC and fixed outputs must differ (different metadata at minimum)."""
+        data = os.urandom(4096 * 5)
+        fixed = compress(data, chunking_mode=CHUNKING_FIXED)
+        cdc = compress(data, chunking_mode=CHUNKING_CDC)
+        assert fixed != cdc
+
+
+# ---------------------------------------------------------------------------
+# CDC metadata tests
+# ---------------------------------------------------------------------------
+
+class TestCDCMetadata:
+    def test_cdc_mode_stored_in_container(self):
+        from metacompressor.container import deserialise
+        data = b"x" * 10000
+        mc1 = compress(data, chunking_mode=CHUNKING_CDC)
+        container = deserialise(mc1)
+        assert container.chunking_mode == "cdc"
+        assert container.min_chunk_size is not None
+        assert container.avg_chunk_size is not None
+        assert container.max_chunk_size is not None
+        assert container.cdc_mask is not None
+
+    def test_fixed_mode_stored_in_container(self):
+        from metacompressor.container import deserialise
+        data = b"x" * 10000
+        mc1 = compress(data, chunking_mode=CHUNKING_FIXED)
+        container = deserialise(mc1)
+        assert container.chunking_mode == "fixed"
+        assert container.chunk_size == 4096
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatibility test
+# ---------------------------------------------------------------------------
+
+class TestBackwardCompatibility:
+    def test_legacy_fixed_file_decompresses(self):
+        """A file compressed with the old (no chunking_mode field) API must
+        still decompress correctly.  We simulate this by patching the
+        serialised payload to remove the 'chunking_mode' key."""
+        import msgpack, zstandard as zstd
+        from metacompressor.container import MAGIC, VERSION, _ZSTD_LEVEL, deserialise
+
+        data = b"legacy round-trip test " * 200
+        mc1 = compress(data, chunking_mode=CHUNKING_FIXED)
+
+        # Unpack and strip the 'chunking_mode' key to simulate old file
+        raw_payload = zstd.ZstdDecompressor().decompress(mc1[5:])
+        payload = msgpack.unpackb(raw_payload, raw=False)
+        del payload["chunking_mode"]
+        repackaged = msgpack.packb(payload, use_bin_type=True)
+        legacy_mc1 = MAGIC + bytes([VERSION]) + zstd.ZstdCompressor(level=_ZSTD_LEVEL).compress(repackaged)
+
+        assert decompress(legacy_mc1) == data
