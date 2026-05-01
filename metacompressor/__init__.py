@@ -1,0 +1,1 @@
+"""MetaCompressor – deterministic lossless compression."""
