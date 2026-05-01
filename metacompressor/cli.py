@@ -2,9 +2,12 @@
 
 Commands
 --------
-mc compress  <input>  <output.mc1>
-mc decompress <input.mc1> <output>
-mc compare   <input>
+mc compress     <input>       <output.mc1>
+mc decompress   <input.mc1>   <output>
+mc compare      <input>
+mc compress-dir <input_dir>   <output.mc1dir>
+mc decompress-dir <input.mc1dir> <output_dir>
+mc compare-dir  <input_dir>
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import zstandard as zstd
 
 from metacompressor.compressor import compress
 from metacompressor.decompressor import decompress
+from metacompressor.corpus import compress_corpus, decompress_corpus
 
 
 def _read(path: str) -> bytes:
@@ -77,6 +81,95 @@ def cmd_compare(args: argparse.Namespace) -> None:
     print(f"ZSTD size       : {zstd_size:>12,} bytes  ratio {ratio(zstd_size)}  time {zstd_time*1000:.1f} ms")
 
 
+def cmd_compress_dir(args: argparse.Namespace) -> None:
+    input_dir = Path(args.input_dir)
+    output_path = Path(args.output)
+
+    t0 = time.perf_counter()
+    mc1dir = compress_corpus(input_dir)
+    elapsed = time.perf_counter() - t0
+
+    output_path.write_bytes(mc1dir)
+
+    # Calculate total uncompressed size for reporting
+    total_original = sum(
+        p.stat().st_size for p in input_dir.rglob("*") if p.is_file()
+    )
+    ratio = len(mc1dir) / total_original if total_original else float("nan")
+    print(
+        f"Compressed {input_dir}  ({total_original:,} bytes across files)\n"
+        f"  → {output_path}  {len(mc1dir):,} bytes  ratio {ratio:.3f}  time {elapsed*1000:.1f} ms"
+    )
+
+
+def cmd_decompress_dir(args: argparse.Namespace) -> None:
+    data = Path(args.input).read_bytes()
+    output_dir = Path(args.output_dir)
+
+    t0 = time.perf_counter()
+    extracted = decompress_corpus(data, output_dir)
+    elapsed = time.perf_counter() - t0
+
+    total_out = sum(
+        (output_dir / p).stat().st_size for p in extracted
+    )
+    print(
+        f"Decompressed {len(data):,} bytes  → {len(extracted)} files  "
+        f"({total_out:,} bytes total)  time {elapsed*1000:.1f} ms"
+    )
+
+
+def cmd_compare_dir(args: argparse.Namespace) -> None:
+    """Compare MC corpus compression vs per-file ZSTD on a directory."""
+    input_dir = Path(args.input_dir)
+    if not input_dir.is_dir():
+        print(f"ERROR: not a directory: {input_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    all_files = sorted(p for p in input_dir.rglob("*") if p.is_file())
+    if not all_files:
+        print("No files found in directory.", file=sys.stderr)
+        sys.exit(1)
+
+    # Read all file data once
+    file_data = [(p.relative_to(input_dir).as_posix(), p.read_bytes()) for p in all_files]
+    total_original = sum(len(d) for _, d in file_data)
+
+    # --- MetaCompressor corpus ---
+    t0 = time.perf_counter()
+    mc1dir = compress_corpus(input_dir)
+    mc_time = time.perf_counter() - t0
+    mc_size = len(mc1dir)
+
+    # --- Zstandard per-file (level 3) ---
+    cctx = zstd.ZstdCompressor(level=3)
+    t0 = time.perf_counter()
+    zstd_total = sum(len(cctx.compress(d)) for _, d in file_data)
+    zstd_time = time.perf_counter() - t0
+
+    def ratio(compressed: int) -> str:
+        if total_original == 0:
+            return "N/A"
+        return f"{compressed / total_original:.4f}"
+
+    print(f"Directory       : {input_dir}")
+    print(f"Files           : {len(all_files)}")
+    print(f"Original size   : {total_original:>12,} bytes  (sum of all files)")
+    print(
+        f"MC corpus size  : {mc_size:>12,} bytes  ratio {ratio(mc_size)}"
+        f"  time {mc_time*1000:.1f} ms"
+    )
+    print(
+        f"ZSTD per-file   : {zstd_total:>12,} bytes  ratio {ratio(zstd_total)}"
+        f"  time {zstd_time*1000:.1f} ms"
+    )
+    if total_original > 0:
+        saving = zstd_total - mc_size
+        pct = saving / zstd_total * 100 if zstd_total else 0
+        sign = "+" if saving >= 0 else ""
+        print(f"MC vs ZSTD      : {sign}{saving:,} bytes  ({sign}{pct:.1f}%)")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mc",
@@ -97,6 +190,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_compare = sub.add_parser("compare", help="Compare MC vs ZSTD compression")
     p_compare.add_argument("input", help="Input file path")
     p_compare.set_defaults(func=cmd_compare)
+
+    p_compress_dir = sub.add_parser("compress-dir", help="Compress a directory to .mc1dir (corpus mode)")
+    p_compress_dir.add_argument("input_dir", help="Input directory path")
+    p_compress_dir.add_argument("output", help="Output .mc1dir file path")
+    p_compress_dir.set_defaults(func=cmd_compress_dir)
+
+    p_decompress_dir = sub.add_parser("decompress-dir", help="Decompress a .mc1dir archive to a directory")
+    p_decompress_dir.add_argument("input", help="Input .mc1dir file path")
+    p_decompress_dir.add_argument("output_dir", help="Output directory path")
+    p_decompress_dir.set_defaults(func=cmd_decompress_dir)
+
+    p_compare_dir = sub.add_parser("compare-dir", help="Compare MC corpus vs per-file ZSTD on a directory")
+    p_compare_dir.add_argument("input_dir", help="Input directory path")
+    p_compare_dir.set_defaults(func=cmd_compare_dir)
 
     return parser
 
