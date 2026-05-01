@@ -85,8 +85,10 @@ def cmd_compress_dir(args: argparse.Namespace) -> None:
     input_dir = Path(args.input_dir)
     output_path = Path(args.output)
 
+    use_delta = not args.no_delta
+
     t0 = time.perf_counter()
-    mc1dir = compress_corpus(input_dir)
+    mc1dir = compress_corpus(input_dir, use_delta=use_delta)
     elapsed = time.perf_counter() - t0
 
     output_path.write_bytes(mc1dir)
@@ -96,8 +98,9 @@ def cmd_compress_dir(args: argparse.Namespace) -> None:
         p.stat().st_size for p in input_dir.rglob("*") if p.is_file()
     )
     ratio = len(mc1dir) / total_original if total_original else float("nan")
+    delta_label = "" if use_delta else " (no delta)"
     print(
-        f"Compressed {input_dir}  ({total_original:,} bytes across files)\n"
+        f"Compressed {input_dir}  ({total_original:,} bytes across files){delta_label}\n"
         f"  → {output_path}  {len(mc1dir):,} bytes  ratio {ratio:.3f}  time {elapsed*1000:.1f} ms"
     )
 
@@ -194,6 +197,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_compress_dir = sub.add_parser("compress-dir", help="Compress a directory to .mc1dir (corpus mode)")
     p_compress_dir.add_argument("input_dir", help="Input directory path")
     p_compress_dir.add_argument("output", help="Output .mc1dir file path")
+    p_compress_dir.add_argument(
+        "--no-delta",
+        action="store_true",
+        default=False,
+        help="Disable intra-chunk delta encoding (store every unique chunk verbatim).",
+    )
     p_compress_dir.set_defaults(func=cmd_compress_dir)
 
     p_decompress_dir = sub.add_parser("decompress-dir", help="Decompress a .mc1dir archive to a directory")
