@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from metacompressor.container import MC1Container, serialise
+from metacompressor.container import MC1Container, CorpusContainer, CorpusFile, serialise, serialise_corpus
 from metacompressor.utils import (
     CHUNK_SIZE,
     CDC_MIN_CHUNK_SIZE,
@@ -88,3 +88,74 @@ def compress(
         container.sequence.append(hash_to_id[h])
 
     return serialise(container)
+
+
+def compress_corpus(
+    files: list[tuple[str, bytes]],
+    chunk_size: int = CHUNK_SIZE,
+    chunking_mode: str = CHUNKING_FIXED,
+    *,
+    min_chunk_size: int = CDC_MIN_CHUNK_SIZE,
+    avg_chunk_size: int = CDC_AVG_CHUNK_SIZE,
+    max_chunk_size: int = CDC_MAX_CHUNK_SIZE,
+    cdc_mask: int = CDC_MASK,
+) -> bytes:
+    """Compress a corpus of *(path, data)* pairs using a shared chunk dictionary.
+
+    Parameters
+    ----------
+    files:
+        Iterable of ``(relative_path, raw_bytes)`` pairs.  Paths must be
+        POSIX-style relative paths (no leading ``/``, no ``..`` components).
+        Files are sorted by path so output is deterministic regardless of
+        the order they are passed in.
+    chunk_size / chunking_mode / min_chunk_size / …:
+        Same semantics as :func:`compress`.
+
+    Returns
+    -------
+    bytes
+        A corpus .mc1 byte string (version ``0x02``).
+    """
+    if chunking_mode not in (CHUNKING_FIXED, CHUNKING_CDC):
+        raise ValueError(f"Unknown chunking_mode: {chunking_mode!r}. "
+                         f"Expected 'fixed' or 'cdc'.")
+
+    # Sort by path for deterministic output.
+    sorted_files = sorted(files, key=lambda item: item[0])
+
+    hash_to_id: dict[str, int] = {}
+    container = CorpusContainer(
+        chunking_mode=chunking_mode,
+        chunk_size=chunk_size,
+        min_chunk_size=min_chunk_size if chunking_mode == CHUNKING_CDC else None,
+        avg_chunk_size=avg_chunk_size if chunking_mode == CHUNKING_CDC else None,
+        max_chunk_size=max_chunk_size if chunking_mode == CHUNKING_CDC else None,
+        cdc_mask=cdc_mask if chunking_mode == CHUNKING_CDC else None,
+    )
+    next_id = 0
+
+    for path, data in sorted_files:
+        if chunking_mode == CHUNKING_CDC:
+            chunks_iter = cdc_chunk_data(
+                data,
+                min_size=min_chunk_size,
+                avg_size=avg_chunk_size,
+                max_size=max_chunk_size,
+                mask=cdc_mask,
+            )
+        else:
+            chunks_iter = chunk_data(data, chunk_size)
+
+        sequence: list[int] = []
+        for chunk in chunks_iter:
+            h = hash_chunk(chunk)
+            if h not in hash_to_id:
+                hash_to_id[h] = next_id
+                container.chunks[next_id] = chunk
+                next_id += 1
+            sequence.append(hash_to_id[h])
+
+        container.files.append(CorpusFile(path=path, sequence=sequence))
+
+    return serialise_corpus(container)
