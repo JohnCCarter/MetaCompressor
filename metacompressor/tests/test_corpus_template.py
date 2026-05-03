@@ -13,6 +13,9 @@ import zstandard as zstd
 from metacompressor.corpus_template import (
     MAGIC,
     VERSION,
+    _MODE_COLUMNAR_V1,
+    _MODE_COLUMNAR_V2,
+    _tokenize,
     compress_corpus_template,
     compress_corpus_template_with_metrics,
     decompress_corpus_template,
@@ -211,10 +214,15 @@ class TestMetrics:
         _, metrics = compress_corpus_template_with_metrics(corpus_dir)
 
         expected_keys = {
+            "structure_v2_enabled",
             "num_files", "num_lines", "num_shared_templates",
             "template_reuse_count", "template_reuse_rate",
+            "json_lines_detected", "json_template_count",
+            "normalized_template_count", "fuzzy_merge_count",
+            "template_reuse_before", "template_reuse_after",
             "raw_fallback_lines", "binary_fallback_files",
             "low_structure_fallback_files",
+            "fallback_reason_counts",
             "avg_vars_per_tpl_line", "compressed_size",
             "tarzstd_size", "chose_raw_fallback", "timing",
             "columnar_enabled", "num_columnar_templates",
@@ -301,9 +309,69 @@ class TestMetrics:
         data_with_metrics, _ = compress_corpus_template_with_metrics(corpus_dir)
         assert data_plain == data_with_metrics
 
+    def test_structure_v2_metrics_detect_json_and_reuse_improvement(self, tmp_path):
+        files = {
+            "events.ndjson": (
+                b'{"service":"api","status":200,"request_id":"user-1","path":"/v1/ping"}\n'
+                b'{"service":"api","status":500,"request_id":"user-2","path":"/v1/ping"}\n'
+            )
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["structure_v2_enabled"] is True
+        assert metrics["json_lines_detected"] >= 2
+        assert metrics["json_template_count"] >= 1
+        assert metrics["template_reuse_after"] >= metrics["template_reuse_before"]
+        assert isinstance(metrics["fallback_reason_counts"], dict)
+
+
+class TestStructureExtractionV2:
+    def test_json_ndjson_round_trip_preserves_exact_bytes(self, tmp_path):
+        files = {
+            "events.ndjson": (
+                b'{"service":"api","status":200,"request_id":"user-1","path":"/v1/ping"}\n'
+                b'{"service":"api","status":500,"request_id":"user-2","path":"/v1/ping"}\n'
+            ),
+            "config.json": (
+                b'{"timeout":30,"retries":3,"enabled":true,"owner":"ops@example.com"}'
+            ),
+        }
+        assert round_trip(tmp_path, files) == files
+
+    def test_json_structure_extraction_beats_legacy_reuse_for_ndjson(self, tmp_path):
+        files = {
+            "events.ndjson": b"".join(
+                (
+                    '{"ts":"2026-01-01T00:00:%02dZ","service":"api","request_id":"user-%02d","path":"/search?q=%s","status":200}\n'
+                    % (i, i, "token%s" % chr(97 + i))
+                ).encode("utf-8")
+                for i in range(20)
+            )
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["template_reuse_after"] > metrics["template_reuse_before"]
+
+    def test_variable_normalization_v2_maps_semantic_variants_to_same_template(self):
+        left = (
+            'ts=2026-01-01T00:00:00Z level=INFO request_id=req-abcdef12 user_id=user-42 '
+            'session_id=sess-1234 path=/api/v1/orders/42?expand=true email=user@example.com '
+            'ip=10.1.2.3 trace=0xabc123'
+        )
+        right = (
+            'ts=2026-01-02T11:12:13Z level=INFO request_id=req-fedcba21 user_id=user-77 '
+            'session_id=sess-9999 path=/api/v1/orders/77?expand=false email=admin@example.com '
+            'ip=10.9.8.7 trace=0xdef456'
+        )
+        assert _tokenize(left)[0] == _tokenize(right)[0]
+
 
 class TestColumnarMode:
-    def test_columnar_round_trip(self, tmp_path):
+    def test_columnar_round_trip(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "metacompressor.corpus_template._CORPUS_FALLBACK_THRESHOLD",
+            float("inf"),
+        )
         files = {
             "a.log": b"".join(
                 f"INFO seq={i} status={i % 5} user={i % 9} code={200 + (i % 3)}\n".encode()
@@ -316,7 +384,7 @@ class TestColumnarMode:
         }
         corpus_dir = make_corpus(tmp_path, files)
         archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
-        assert metrics["final_selected_mode"] == "corpus_template_columnar_v1"
+        assert metrics["final_selected_mode"] == _MODE_COLUMNAR_V2
 
         out_dir = tmp_path / "out"
         decompress_corpus_template(archive, out_dir)
@@ -324,10 +392,14 @@ class TestColumnarMode:
             assert (out_dir / rel).read_bytes() == data
 
         payload = unpack_payload(archive)
-        assert payload["mode"] == "corpus_template_columnar_v1"
+        assert payload["mode"] == _MODE_COLUMNAR_V2
         assert "template_blocks" in payload
 
-    def test_columnar_output_is_deterministic(self, tmp_path):
+    def test_columnar_output_is_deterministic(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "metacompressor.corpus_template._CORPUS_FALLBACK_THRESHOLD",
+            float("inf"),
+        )
         files = {
             "a.log": b"INFO seq=1 status=200\nINFO seq=2 status=200\n" * 120,
             "b.log": b"INFO seq=100 status=500\nINFO seq=101 status=500\n" * 120,
@@ -338,9 +410,38 @@ class TestColumnarMode:
         archive1, metrics1 = compress_corpus_template_with_metrics(dir1)
         archive2, metrics2 = compress_corpus_template_with_metrics(dir2)
 
-        assert metrics1["final_selected_mode"] == "corpus_template_columnar_v1"
-        assert metrics2["final_selected_mode"] == "corpus_template_columnar_v1"
+        assert metrics1["final_selected_mode"] == _MODE_COLUMNAR_V2
+        assert metrics2["final_selected_mode"] == _MODE_COLUMNAR_V2
         assert archive1 == archive2
+
+    def test_columnar_block_flushing_round_trip(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "metacompressor.corpus_template._CORPUS_FALLBACK_THRESHOLD",
+            float("inf"),
+        )
+        files = {
+            "flush.log": b"".join(
+                f"INFO seq={i} status={i % 5} user={i % 7}\n".encode()
+                for i in range(500)
+            )
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        monkeypatch.setattr(
+            "metacompressor.corpus_template._MAX_COLUMNAR_BLOCK_ROWS",
+            32,
+        )
+
+        archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["final_selected_mode"] == _MODE_COLUMNAR_V2
+
+        payload = unpack_payload(archive)
+        block_lists = [entry for entry in payload["template_blocks"] if entry is not None]
+        assert block_lists
+        assert any(len(entry) > 1 for entry in block_lists)
+
+        out_dir = tmp_path / "out_flush"
+        decompress_corpus_template(archive, out_dir)
+        assert (out_dir / "flush.log").read_bytes() == files["flush.log"]
 
     def test_old_row_mode_archive_still_decompresses(self, tmp_path):
         payload = {
@@ -361,6 +462,37 @@ class TestColumnarMode:
         )
 
         out_dir = tmp_path / "out"
+        extracted = decompress_corpus_template(archive, out_dir)
+
+        assert extracted == ["legacy.log"]
+        assert (out_dir / "legacy.log").read_bytes() == b"INFO seq=1 status=200\nINFO seq=2 status=404"
+
+    def test_old_columnar_v1_archive_still_decompresses(self, tmp_path):
+        payload = {
+            "mode": _MODE_COLUMNAR_V1,
+            "templates": ["INFO seq={} status={}"],
+            "files": [{"path": "legacy.log", "kind": "text", "num_lines": 2}],
+            "template_blocks": [
+                {
+                    "row_refs": [[0, 0], [0, 1]],
+                    "columns": [
+                        {"encoding": "raw_msgpack", "data": msgpack.packb(["1", "2"], use_bin_type=True)},
+                        {"encoding": "raw_msgpack", "data": msgpack.packb(["200", "404"], use_bin_type=True)},
+                    ],
+                }
+            ],
+            "raw_files": [],
+            "metadata": {"raw_lines": []},
+        }
+        archive = (
+            MAGIC
+            + bytes([VERSION])
+            + zstd.ZstdCompressor(level=3).compress(
+                msgpack.packb(payload, use_bin_type=True)
+            )
+        )
+
+        out_dir = tmp_path / "out_v1"
         extracted = decompress_corpus_template(archive, out_dir)
 
         assert extracted == ["legacy.log"]
@@ -412,12 +544,16 @@ class TestColumnarMode:
         assert metrics["raw_column_fallback_count"] >= 1
         assert metrics["column_encoding_counts"].get("raw_msgpack", 0) >= 1
 
-    def test_no_trailing_newline_with_columnar_mode(self, tmp_path):
+    def test_no_trailing_newline_with_columnar_mode(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "metacompressor.corpus_template._CORPUS_FALLBACK_THRESHOLD",
+            float("inf"),
+        )
         lines = [f"INFO seq={i}".encode() for i in range(1, 200)]
         files = {"nonl.log": b"\n".join(lines)}
         corpus_dir = make_corpus(tmp_path, files)
         archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
-        assert metrics["final_selected_mode"] == "corpus_template_columnar_v1"
+        assert metrics["final_selected_mode"] == _MODE_COLUMNAR_V2
         out_dir = tmp_path / "out"
         decompress_corpus_template(archive, out_dir)
         assert (out_dir / "nonl.log").read_bytes() == files["nonl.log"]

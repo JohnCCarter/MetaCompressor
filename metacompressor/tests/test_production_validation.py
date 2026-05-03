@@ -101,3 +101,4 @@ def test_run_validation_writes_reports_for_small_fixture(tmp_path, monkeypatch):
     assert payload["determinism_passed"] is True
     assert (tmp_path / "metacompressor_production_validation.json").exists()
     assert (tmp_path / "metacompressor_production_validation.md").exists()
+    assert (tmp_path / "metacompressor_structure_v2_report.md").exists()

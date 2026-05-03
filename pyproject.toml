@@ -18,3 +18,8 @@ mc = "metacompressor.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["metacompressor/tests"]
+markers = [
+    "small: small tests (<= 1MB datasets)",
+    "medium: medium tests (<= 50MB datasets)",
+    "large: large tests (>= 100MB datasets; opt-in with RUN_LARGE_TESTS=1)",
+]
