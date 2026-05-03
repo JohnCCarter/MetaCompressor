@@ -653,6 +653,7 @@ class TestLargeStructuredLogs:
         decompress_s = time.perf_counter() - t1
 
         assert (out / "large.log").read_bytes() == (corpus / "large.log").read_bytes()
+        assert peak_mb < 128.0, f"50 MB structured corpus peak memory regression: {peak_mb:.1f} MB"
 
         tz = tar_zstd_compress_dir(corpus)
         pf = per_file_zstd_compress_dir(corpus)

@@ -32,6 +32,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from metacompressor.corpus_template import (  # noqa: E402
     _MIN_TEMPLATE_OCCURRENCES,
+    _MODE_COLUMNAR_V2,
     _MODE_COLUMNAR_V1,
     _MODE_RAW_TAR_ZSTD,
     _MODE_ROW_V1,
@@ -39,6 +40,7 @@ from metacompressor.corpus_template import (  # noqa: E402
     _analyze_line,
     _build_columnar_template_archive,
     _build_row_template_archive,
+    _iter_text_lines,
     compress_corpus_template_with_metrics,
     decompress_corpus_template,
     _template_string,
@@ -150,7 +152,7 @@ def _fmt_pct(value: Optional[float]) -> str:
 def _mode_label(mode: str) -> str:
     if mode == _MODE_ROW_V1:
         return "row"
-    if mode == _MODE_COLUMNAR_V1:
+    if mode in (_MODE_COLUMNAR_V1, _MODE_COLUMNAR_V2):
         return "columnar"
     if mode == _MODE_RAW_TAR_ZSTD:
         return "raw_tar_zstd"
@@ -310,13 +312,11 @@ def _prepare_template_context(
     t_tokenize_start = time.perf_counter()
     for file_path in all_files:
         rel = file_path.relative_to(input_dir).as_posix()
-        raw = file_path.read_bytes()
+        file_tpl_count = {}
+        file_total_lines = 0
         try:
-            text = raw.decode("utf-8")
-            lines = text.split("\n")
-            file_meta.append((rel, False))
-            for line in lines:
-                total_lines += 1
+            for line in _iter_text_lines(file_path):
+                file_total_lines += 1
                 if line not in tok_cache:
                     if structure_v2_enabled:
                         tok_cache[line] = _analyze_line(line)
@@ -331,7 +331,11 @@ def _prepare_template_context(
                             json_structure_key=(),
                         )
                 template_key = tok_cache[line].template_parts
-                tpl_count[template_key] = tpl_count.get(template_key, 0) + 1
+                file_tpl_count[template_key] = file_tpl_count.get(template_key, 0) + 1
+            file_meta.append((rel, False))
+            total_lines += file_total_lines
+            for template_key, count in file_tpl_count.items():
+                tpl_count[template_key] = tpl_count.get(template_key, 0) + count
         except UnicodeDecodeError:
             file_meta.append((rel, True))
     tokenize_s = time.perf_counter() - t_tokenize_start
@@ -389,7 +393,7 @@ def _compress_forced_mode(
             "column_encoding_counts": {},
             "raw_column_fallback_count": 0,
         }
-    elif mode == _MODE_COLUMNAR_V1:
+    elif mode in (_MODE_COLUMNAR_V1, _MODE_COLUMNAR_V2):
         archive, stats = _build_columnar_template_archive(
             all_files=all_files,
             file_meta=file_meta,
@@ -437,12 +441,12 @@ def _compress_forced_mode(
         "compressed_size": len(archive),
         "tarzstd_size": None,
         "chose_raw_fallback": False,
-        "columnar_enabled": mode == _MODE_COLUMNAR_V1,
+        "columnar_enabled": mode in (_MODE_COLUMNAR_V1, _MODE_COLUMNAR_V2),
         "num_columnar_templates": column_stats["num_columnar_templates"],
         "num_encoded_columns": column_stats["num_encoded_columns"],
         "column_encoding_counts": column_stats["column_encoding_counts"],
         "raw_column_fallback_count": column_stats["raw_column_fallback_count"],
-        "columnar_size": len(archive) if mode == _MODE_COLUMNAR_V1 else None,
+        "columnar_size": len(archive) if mode in (_MODE_COLUMNAR_V1, _MODE_COLUMNAR_V2) else None,
         "row_mode_size": len(archive) if mode == _MODE_ROW_V1 else None,
         "columnar_savings_vs_row": None,
         "final_selected_mode": mode,
@@ -477,10 +481,10 @@ def _run_mc_mode(
             _MODE_ROW_V1,
             structure_v2_enabled=structure_v2_enabled,
         )
-    elif mode == _MODE_COLUMNAR_V1:
+    elif mode in (_MODE_COLUMNAR_V1, _MODE_COLUMNAR_V2):
         compress_func = lambda: _compress_forced_mode(
             input_dir,
-            _MODE_COLUMNAR_V1,
+            _MODE_COLUMNAR_V2,
             structure_v2_enabled=structure_v2_enabled,
         )
     else:
@@ -1082,7 +1086,7 @@ def _measure_dataset(dataset_dir: Path, spec: DatasetSpec, work_dir: Path) -> Di
     methods["mc_row_template"] = _run_mc_mode(dataset_dir, _MODE_ROW_V1, work_dir / "mc_row")
     methods["mc_columnar_template"] = _run_mc_mode(
         dataset_dir,
-        _MODE_COLUMNAR_V1,
+        _MODE_COLUMNAR_V2,
         work_dir / "mc_columnar",
     )
     methods["mc_final_selected"] = _run_mc_mode(dataset_dir, "auto", work_dir / "mc_final")
