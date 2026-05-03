@@ -55,6 +55,13 @@ VERSION = 0x01
 _ZSTD_LEVEL = 3
 _MIN_TEMPLATE_OCCURRENCES = 2
 
+# Per-file low-structure fallback: if fewer than this fraction of a text
+# file's lines match a recurring template, the whole file is stored as raw
+# bytes (same as the 0-template hybrid fallback).  This avoids per-line
+# msgpack record overhead for semi-structured files where template reuse is
+# sparse.  Set to 0.0 to disable (original behaviour for non-zero cases).
+_MIN_FILE_TEMPLATE_RATE = 0.10
+
 # ---------------------------------------------------------------------------
 # Tokenisation — extended variable patterns (mirrors log_template._VAR_RE)
 # ---------------------------------------------------------------------------
@@ -166,8 +173,14 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
         - ``template_reuse_count``    – total template-mode line records written
         - ``template_reuse_rate``     – template_reuse_count / num_lines (0–1)
         - ``raw_fallback_lines``      – lines stored verbatim (``[-1, ...]``)
-        - ``binary_fallback_files``   – files stored as raw bytes (UTF-8 failure
-                                        or hybrid fallback)
+        - ``binary_fallback_files``   – files stored as raw bytes (UTF-8 failure,
+                                        hybrid fallback, or low-structure fallback)
+        - ``low_structure_fallback_files`` – text files that had some recurring
+                                        templates but below the
+                                        :data:`_MIN_FILE_TEMPLATE_RATE` threshold;
+                                        stored as raw bytes to avoid per-line
+                                        msgpack overhead (subset of
+                                        ``binary_fallback_files``)
         - ``avg_vars_per_tpl_line``   – average number of variable slots used
                                         across template-mode lines
         - ``compressed_size``         – byte length of the compressed output
@@ -254,6 +267,7 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
     template_reuse_count = 0
     raw_fallback_lines = 0
     binary_fallback_files = 0
+    low_structure_fallback_files = 0
     total_var_slots = 0  # sum of variable counts across template-mode lines
 
     t_encode_start = time.perf_counter()
@@ -284,12 +298,23 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
                 records.append([-1, line])
                 file_raw_lines += 1
 
-        # Hybrid fallback: if no lines used template mode, store the file as
-        # its original raw bytes to avoid per-line raw-record overhead.
-        # Use the already-read raw_bytes (preserved from Phase 1) so that
-        # the stored bytes are byte-for-byte identical to the original file.
-        if file_tpl_lines == 0 and lines:
+        # Hybrid / low-structure fallback: store the file as its original raw
+        # bytes when:
+        #   (a) no lines used template mode at all (original behaviour), OR
+        #   (b) template usage is sparse (< _MIN_FILE_TEMPLATE_RATE) – avoids
+        #       per-line [-1, raw_line] msgpack record overhead for files that
+        #       are mostly unstructured but have a handful of matching lines.
+        # In both cases we use the already-read raw_bytes from Phase 1 so the
+        # stored bytes are byte-for-byte identical to the original file.
+        file_total_lines = len(lines)
+        file_template_rate = (
+            file_tpl_lines / file_total_lines if file_total_lines > 0 else 0.0
+        )
+        if (file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE) and lines:
             binary_fallback_files += 1
+            if file_tpl_lines > 0:
+                # Had some templates but below the threshold – distinct sub-case.
+                low_structure_fallback_files += 1
             raw_fallback_lines += file_raw_lines
             encoded_files.append({
                 "path": rel,
@@ -333,6 +358,7 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
         "template_reuse_rate": reuse_rate,
         "raw_fallback_lines": raw_fallback_lines,
         "binary_fallback_files": binary_fallback_files,
+        "low_structure_fallback_files": low_structure_fallback_files,
         "avg_vars_per_tpl_line": avg_vars,
         "compressed_size": len(result),
         "timing": {

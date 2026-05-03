@@ -202,6 +202,7 @@ class TestMetrics:
             "num_files", "num_lines", "num_shared_templates",
             "template_reuse_count", "template_reuse_rate",
             "raw_fallback_lines", "binary_fallback_files",
+            "low_structure_fallback_files",
             "avg_vars_per_tpl_line", "compressed_size", "timing",
         }
         assert expected_keys.issubset(metrics.keys())
