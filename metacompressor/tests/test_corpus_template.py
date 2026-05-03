@@ -203,7 +203,8 @@ class TestMetrics:
             "template_reuse_count", "template_reuse_rate",
             "raw_fallback_lines", "binary_fallback_files",
             "low_structure_fallback_files",
-            "avg_vars_per_tpl_line", "compressed_size", "timing",
+            "avg_vars_per_tpl_line", "compressed_size",
+            "tarzstd_size", "chose_raw_fallback", "timing",
         }
         assert expected_keys.issubset(metrics.keys())
 
@@ -349,4 +350,68 @@ class TestHybridFallback:
         }
         result = round_trip(tmp_path, files)
         assert result == files
+
+
+# ---------------------------------------------------------------------------
+# Smart TAR+ZSTD fallback
+# ---------------------------------------------------------------------------
+
+class TestRawFallback:
+    """Tests for the raw_tar_zstd automatic fallback mode."""
+
+    def test_chose_raw_fallback_false_for_structured_logs(self, tmp_path):
+        """Highly structured logs must NOT trigger the raw fallback."""
+        from metacompressor.corpus_template import compress_corpus_template_with_metrics
+
+        files = {f"day{i}.log": b"INFO req=1 status=200 path=/api\n" * 200
+                 for i in range(5)}
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["chose_raw_fallback"] is False
+
+    def test_tarzstd_size_in_metrics(self, tmp_path):
+        """tarzstd_size must always be a positive integer."""
+        from metacompressor.corpus_template import compress_corpus_template_with_metrics
+
+        files = {"a.log": b"INFO val=1\nINFO val=2\n" * 30}
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert isinstance(metrics["tarzstd_size"], int)
+        assert metrics["tarzstd_size"] > 0
+
+    def test_raw_fallback_round_trip(self, tmp_path):
+        """When raw_tar_zstd mode fires, the corpus must still round-trip."""
+        import os
+        from metacompressor.corpus_template import (
+            _CORPUS_FALLBACK_THRESHOLD,
+            compress_corpus_template_with_metrics,
+            decompress_corpus_template,
+        )
+
+        # Corpus that is hard for template mode: unique random-hex payloads.
+        files = {
+            f"rand{i}.log": (
+                "ENTRY id={i} payload={h} x={x}\n".format(
+                    i=i, h=os.urandom(16).hex(), x=os.urandom(4).hex()
+                )
+            ).encode() * 1
+            for i in range(20)
+        }
+        # Add a structured anchor so the corpus isn't 100% binary fallback,
+        # but keep it sparse enough that raw fallback might fire.
+        files["anchor.log"] = b"INFO event=1 status=200\n" * 3
+
+        corpus_dir = make_corpus(tmp_path, files)
+        archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
+
+        out = tmp_path / "out"
+        decompress_corpus_template(archive, out)
+
+        # Every file must round-trip exactly.
+        for rel, data in files.items():
+            assert (out / rel).read_bytes() == data, f"Mismatch for {rel}"
+
+        # If fallback fired, archive must be no larger than TAR+ZSTD * threshold.
+        if metrics["chose_raw_fallback"]:
+            assert len(archive) <= metrics["tarzstd_size"] * _CORPUS_FALLBACK_THRESHOLD + 200
 

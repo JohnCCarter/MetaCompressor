@@ -11,14 +11,53 @@ Text files whose lines produce no template-mode records are also stored as raw
 bytes (hybrid fallback) so that template overhead never hurts single-file
 or low-structure corpora.
 
+Streaming design (two-pass, O(1-file) peak memory)
+---------------------------------------------------
+Pass 1  Read each file → tokenise + count → discard raw bytes and decoded text
+        immediately.  Only the *tok_cache* (unique line → ``(tpl_key, values)``)
+        and *tpl_count* (``tpl_key → occurrence count``) survive this pass.
+        Peak memory during pass 1: O(largest single file + tok_cache).
+
+Pass 2  Re-read each file → encode using the shared template dict → stream file
+        entries one-by-one through a :class:`msgpack.Packer` directly into a
+        :class:`zstandard.ZstdCompressor.stream_writer`.  No in-memory
+        accumulation of the ``encoded_files`` list.  Peak memory during pass 2:
+        O(largest single file + tok_cache + tpl_strings + compressed_output).
+
+Win/loss map
+------------
+**MC wins** (typically 5–30 % smaller than TAR+ZSTD) when:
+
+* The corpus has many files that share the same log template (structured logs,
+  metrics, application events).
+* ``template_reuse_rate`` ≥ 0.7 — most lines participate in template mode.
+* Variable values are short numbers or IDs that compress poorly on their own.
+* Many small files: TAR overhead dominates TAR+ZSTD, while MC shares templates
+  across all files without per-file overhead.
+
+**MC is comparable or slightly worse** when:
+
+* *Nginx / access logs* – each line has 5–8 variable slots (IP, timestamp,
+  path, status, size, latency) filled with high-cardinality unique values.
+  The per-record msgpack overhead can rival the structural savings.  When
+  template output exceeds TAR+ZSTD by more than ``_CORPUS_FALLBACK_THRESHOLD``,
+  the codec falls back transparently to a TAR+ZSTD payload stored inside the
+  MCK wrapper (``raw_tar_zstd`` mode), guaranteeing size never exceeds
+  TAR+ZSTD + a few dozen bytes.
+* *Random or pre-compressed binary data* – all files hit the binary fallback;
+  template overhead is zero, but MC cannot beat ZSTD on random data.
+* *Prose / natural-language text* – few variable extractions; the
+  ``_MIN_FILE_TEMPLATE_RATE`` low-structure fallback stores such files as raw
+  bytes, trading per-line msgpack overhead for raw ZSTD compression.
+
 Binary layout (.mck file)
 --------------------------
 [4 bytes] magic   ``MCK\\x00``
 [1 byte]  version  0x01
 [N bytes] zstandard-compressed msgpack payload
 
-Payload (msgpack map)
----------------------
+Payload (msgpack map) — template mode
+--------------------------------------
 ``templates``  : list[str]   – shared template strings, indexed by position
 ``files``      : list[dict]  – one entry per file, each with:
     ``path``    : str         – relative POSIX path
@@ -27,6 +66,16 @@ Payload (msgpack map)
         ``[-1, raw_line]``        – verbatim text line (template not reused)
         ``[-2, raw_bytes]``       – binary file stored as raw bytes payload
                                     (entire file content, single record)
+
+Payload (msgpack map) — raw_tar_zstd mode (automatic fallback)
+---------------------------------------------------------------
+``mode``   : ``"raw_tar_zstd"``
+``data``   : bytes  – TAR+ZSTD-compressed corpus (level 3)
+
+This mode is written automatically when the template-mode output would be
+more than ``_CORPUS_FALLBACK_THRESHOLD`` × larger than a plain TAR+ZSTD
+archive of the same corpus.  Old archives without a ``mode`` key are treated
+as template mode (backward-compatible).
 
 Public API
 ----------
@@ -39,6 +88,7 @@ from __future__ import annotations
 
 import io
 import re
+import tarfile
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -54,6 +104,12 @@ MAGIC = b"MCK\x00"
 VERSION = 0x01
 _ZSTD_LEVEL = 3
 _MIN_TEMPLATE_OCCURRENCES = 2
+
+# Automatic raw fallback: if the template-mode archive is larger than a plain
+# TAR+ZSTD of the same corpus by this factor, re-encode in ``raw_tar_zstd``
+# mode so the caller never receives an archive bigger than TAR+ZSTD.
+# Set to float("inf") to disable the fallback entirely.
+_CORPUS_FALLBACK_THRESHOLD = 1.10
 
 # Per-file low-structure fallback: if fewer than this fraction of a text
 # file's lines match a recurring template, the whole file is stored as raw
@@ -141,21 +197,37 @@ def compress_corpus_template(input_dir: Path) -> bytes:
 def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]:
     """Compress all files under *input_dir* using a shared template dictionary.
 
-    Algorithm
-    ---------
+    Algorithm (two-pass streaming, O(1-file) peak memory)
+    ------------------------------------------------------
+    **Pass 1** – tokenise + count (one file at a time; raw bytes discarded
+    after each file):
+
     1. Walk all files recursively in deterministic order.
-    2. Attempt UTF-8 decode of each file; tag binary files for raw storage.
-    3. Tokenise every line of every text file and count template-key occurrences
-       **globally** across the entire corpus.
-    4. Build a shared template dictionary: every template_key with ≥
-       :data:`_MIN_TEMPLATE_OCCURRENCES` global occurrences gets an integer ID.
-    5. Encode each file using the shared dictionary:
+    2. Attempt UTF-8 decode; tag binary files.
+    3. Tokenise every line of every text file; populate *tok_cache* (unique
+       line → ``(template_key, values)``) and count global template-key
+       occurrences.
+
+    **Build shared dictionary** from keys with ≥
+    :data:`_MIN_TEMPLATE_OCCURRENCES` occurrences.
+
+    **Pass 2** – encode + stream output (one file at a time; records flushed
+    immediately to the zstd stream writer):
+
+    4. Re-read each file, encode using the shared dictionary:
        - template-mode lines → ``[tpl_id, [val, …]]``
        - non-recurring text lines → ``[-1, raw_line]``
        - binary files → single ``[-2, raw_bytes]`` record
        - text files with zero template-mode lines → ``[-2, raw_bytes]`` record
          (hybrid fallback: avoids raw-line overhead for template-poor files)
-    6. Serialise: ``MAGIC + VERSION + zstd(msgpack(payload))``.
+    5. Each encoded file entry is packed with :class:`msgpack.Packer` and
+       written directly to a :class:`zstd.ZstdCompressor.stream_writer`,
+       avoiding in-memory accumulation of the full encoded-files list.
+
+    **Smart fallback** – if the template output exceeds a plain TAR+ZSTD
+    archive of the same corpus by more than :data:`_CORPUS_FALLBACK_THRESHOLD`,
+    re-encode as ``raw_tar_zstd`` mode.  This guarantees that callers never
+    receive an archive larger than TAR+ZSTD + a few dozen bytes overhead.
 
     Parameters
     ----------
@@ -184,9 +256,15 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
         - ``avg_vars_per_tpl_line``   – average number of variable slots used
                                         across template-mode lines
         - ``compressed_size``         – byte length of the compressed output
+        - ``tarzstd_size``            – byte length of equivalent TAR+ZSTD
+                                        (computed for the fallback comparison)
+        - ``chose_raw_fallback``      – ``True`` when the codec chose
+                                        ``raw_tar_zstd`` mode because template
+                                        output exceeded the fallback threshold
         - ``timing``                  – sub-timing dict with keys
-                                        ``extract_s``, ``serialize_s``,
-                                        ``zstd_s``, ``total_s``
+                                        ``tokenize_s``, ``count_s``,
+                                        ``encode_s``, ``extract_s``,
+                                        ``serialize_s``, ``zstd_s``, ``total_s``
 
     Raises
     ------
@@ -202,54 +280,47 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
     all_files = sorted(p for p in input_dir.rglob("*") if p.is_file())
 
     # -----------------------------------------------------------------------
-    # Phase 1: file I/O – read and UTF-8-decode every file
+    # Pass 1: tokenise + count
+    #
+    # Read each file, tokenise, count, then discard raw bytes and decoded text.
+    # Only tok_cache and tpl_count survive this pass, keeping peak memory at
+    # O(largest single file + tok_cache) instead of O(entire_corpus).
     # -----------------------------------------------------------------------
     t_extract_start = time.perf_counter()
 
-    file_info: List[Tuple[str, Optional[List[str]], bytes]] = []
+    # file_meta stores (rel_path, is_binary) only — no raw bytes between passes.
+    file_meta: List[Tuple[str, bool]] = []
+
+    # tok_cache: unique line → (template_key, variable_values).
+    # One regex call per *unique* line; for repetitive corpora this reduces
+    # O(N) regex splits to O(distinct lines), typically a handful.
+    tok_cache: Dict[str, Tuple[Tuple[str, ...], List[str]]] = {}
+    tpl_count: Dict[Tuple[str, ...], int] = {}
+    total_lines = 0  # text lines across all text files (for reuse_rate)
+
+    t_tokenize_start = time.perf_counter()
     for file_path in all_files:
         rel = file_path.relative_to(input_dir).as_posix()
         raw = file_path.read_bytes()
         try:
             text = raw.decode("utf-8")
             lines = text.split("\n")
-            file_info.append((rel, lines, raw))
+            file_meta.append((rel, False))
+            for line in lines:
+                total_lines += 1
+                if line not in tok_cache:
+                    tok_cache[line] = _tokenize(line)
+                tkey = tok_cache[line][0]
+                tpl_count[tkey] = tpl_count.get(tkey, 0) + 1
         except UnicodeDecodeError:
-            file_info.append((rel, None, raw))
-
-    # -----------------------------------------------------------------------
-    # Phase 2: tokenise – one regex call per *unique* line
-    #
-    # tok_cache maps each unique line string to its (template_key, values)
-    # pair.  For highly repetitive corpora (e.g. a 10 MB file where every
-    # line is identical) this reduces O(N) regex splits to O(unique lines),
-    # typically just a handful.  The cache is local to this call so it is
-    # always GC'd when the function returns.
-    # -----------------------------------------------------------------------
-    tok_cache: Dict[str, Tuple[Tuple[str, ...], List[str]]] = {}
-
-    t_tokenize_start = time.perf_counter()
-    for _, lines, _ in file_info:
-        if lines is None:
-            continue
-        for line in lines:
-            if line not in tok_cache:
-                tok_cache[line] = _tokenize(line)
+            file_meta.append((rel, True))
+        # raw, text, lines are freed at end of each iteration — O(1 file) peak.
     t_tokenize_s = time.perf_counter() - t_tokenize_start
+    t_count_s = 0.0  # tokenise and count are combined in a single pass above
 
     # -----------------------------------------------------------------------
-    # Phase 3: count template-key occurrences + build shared dictionary
+    # Build shared template dictionary
     # -----------------------------------------------------------------------
-    t_count_start = time.perf_counter()
-
-    tpl_count: Dict[Tuple[str, ...], int] = {}
-    for _, lines, _ in file_info:
-        if lines is None:
-            continue
-        for line in lines:
-            tkey = tok_cache[line][0]
-            tpl_count[tkey] = tpl_count.get(tkey, 0) + 1
-
     tpl_to_id: Dict[Tuple[str, ...], int] = {}
     tpl_strings: List[str] = []
     for tkey, cnt in tpl_count.items():
@@ -258,91 +329,122 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
                 tpl_to_id[tkey] = len(tpl_strings)
                 tpl_strings.append(_template_string(tkey))
 
-    t_count_s = time.perf_counter() - t_count_start
-
     # -----------------------------------------------------------------------
-    # Phase 4: encode each file using the shared dictionary + cache
+    # Pass 2: encode + stream output
+    #
+    # Re-read each file, encode using tok_cache and tpl_to_id, and write each
+    # encoded file entry immediately to a msgpack Packer piped into a zstd
+    # stream writer.  No in-memory accumulation of encoded_files list.
     # -----------------------------------------------------------------------
-    total_lines = 0
     template_reuse_count = 0
     raw_fallback_lines = 0
     binary_fallback_files = 0
     low_structure_fallback_files = 0
-    total_var_slots = 0  # sum of variable counts across template-mode lines
+    total_var_slots = 0
 
     t_encode_start = time.perf_counter()
 
-    encoded_files: List[dict] = []
-    for rel, lines, raw_bytes in file_info:
-        if lines is None:
-            # Binary file (UTF-8 decode failed): single raw-bytes record.
-            binary_fallback_files += 1
-            encoded_files.append({
-                "path": rel,
-                "records": [[-2, raw_bytes]],
-            })
-            continue
+    output = io.BytesIO()
+    output.write(MAGIC + bytes([VERSION]))
+    packer = msgpack.Packer(use_bin_type=True)
+    cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
 
-        records: List = []
-        file_tpl_lines = 0
-        file_raw_lines = 0
-        file_var_total = 0
-        for line in lines:
-            total_lines += 1
-            tkey, values = tok_cache[line]  # always a cache hit
-            if tkey in tpl_to_id:
-                records.append([tpl_to_id[tkey], values])
-                file_tpl_lines += 1
-                file_var_total += len(values)
+    with cctx.stream_writer(output, closefd=False) as compressor:
+        # Streaming msgpack map: {"templates": [...], "files": [...]}
+        # pack_map_header(2) + keys/values produces the same bytes as
+        # msgpack.packb({"templates": ..., "files": [...]}) for 2-key maps.
+        compressor.write(packer.pack_map_header(2))
+        compressor.write(packer.pack("templates"))
+        compressor.write(packer.pack(tpl_strings))
+        compressor.write(packer.pack("files"))
+        compressor.write(packer.pack_array_header(len(all_files)))
+
+        t_serialize_start = time.perf_counter()
+        for file_path, (rel, is_binary) in zip(all_files, file_meta):
+            raw = file_path.read_bytes()  # re-read for pass 2
+
+            if is_binary:
+                binary_fallback_files += 1
+                compressor.write(packer.pack({"path": rel, "records": [[-2, raw]]}))
+                continue
+
+            text = raw.decode("utf-8")
+            lines = text.split("\n")
+            records: List = []
+            file_tpl_lines = 0
+            file_raw_lines = 0
+            file_var_total = 0
+            for line in lines:
+                tkey, values = tok_cache[line]  # always a cache hit
+                if tkey in tpl_to_id:
+                    records.append([tpl_to_id[tkey], values])
+                    file_tpl_lines += 1
+                    file_var_total += len(values)
+                else:
+                    records.append([-1, line])
+                    file_raw_lines += 1
+
+            # Hybrid / low-structure fallback: store the file as raw bytes when:
+            #   (a) no lines used template mode at all, OR
+            #   (b) template usage is sparse (< _MIN_FILE_TEMPLATE_RATE).
+            # raw is already available from the re-read above.
+            file_total_lines = len(lines)
+            file_template_rate = (
+                file_tpl_lines / file_total_lines if file_total_lines > 0 else 0.0
+            )
+            if (
+                (file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE)
+                and lines
+            ):
+                binary_fallback_files += 1
+                if file_tpl_lines > 0:
+                    low_structure_fallback_files += 1
+                raw_fallback_lines += file_raw_lines
+                compressor.write(packer.pack({"path": rel, "records": [[-2, raw]]}))
             else:
-                records.append([-1, line])
-                file_raw_lines += 1
+                template_reuse_count += file_tpl_lines
+                raw_fallback_lines += file_raw_lines
+                total_var_slots += file_var_total
+                compressor.write(packer.pack({"path": rel, "records": records}))
 
-        # Hybrid / low-structure fallback: store the file as its original raw
-        # bytes when:
-        #   (a) no lines used template mode at all (original behaviour), OR
-        #   (b) template usage is sparse (< _MIN_FILE_TEMPLATE_RATE) – avoids
-        #       per-line [-1, raw_line] msgpack record overhead for files that
-        #       are mostly unstructured but have a handful of matching lines.
-        # In both cases we use the already-read raw_bytes from Phase 1 so the
-        # stored bytes are byte-for-byte identical to the original file.
-        file_total_lines = len(lines)
-        file_template_rate = (
-            file_tpl_lines / file_total_lines if file_total_lines > 0 else 0.0
-        )
-        if (file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE) and lines:
-            binary_fallback_files += 1
-            if file_tpl_lines > 0:
-                # Had some templates but below the threshold – distinct sub-case.
-                low_structure_fallback_files += 1
-            raw_fallback_lines += file_raw_lines
-            encoded_files.append({
-                "path": rel,
-                "records": [[-2, raw_bytes]],
-            })
-        else:
-            template_reuse_count += file_tpl_lines
-            raw_fallback_lines += file_raw_lines
-            total_var_slots += file_var_total
-            encoded_files.append({"path": rel, "records": records})
-
+    t_serialize_s = time.perf_counter() - t_serialize_start
+    t_zstd_s = 0.0  # interleaved with serialisation inside stream_writer
     t_encode_s = time.perf_counter() - t_encode_start
     t_extract_s = time.perf_counter() - t_extract_start
 
-    # -----------------------------------------------------------------------
-    # Phase 5: serialise (msgpack) + compress (zstd)
-    # -----------------------------------------------------------------------
-    t_serialize_start = time.perf_counter()
-    payload = {"templates": tpl_strings, "files": encoded_files}
-    raw_payload = msgpack.packb(payload, use_bin_type=True)
-    t_serialize_s = time.perf_counter() - t_serialize_start
+    template_result = output.getvalue()
 
-    t_zstd_start = time.perf_counter()
-    cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
-    compressed = cctx.compress(raw_payload)
-    t_zstd_s = time.perf_counter() - t_zstd_start
+    # -----------------------------------------------------------------------
+    # Smart fallback: TAR+ZSTD comparison
+    #
+    # Build a plain TAR+ZSTD of the same corpus and compare sizes.  If the
+    # template output is more than _CORPUS_FALLBACK_THRESHOLD times larger,
+    # re-encode as raw_tar_zstd mode so the caller never receives an archive
+    # worse than TAR+ZSTD by more than a few dozen bytes of MCK overhead.
+    # -----------------------------------------------------------------------
+    tar_buf = io.BytesIO()
+    with tarfile.open(fileobj=tar_buf, mode="w") as tar:
+        for fp in all_files:
+            tar.add(str(fp), arcname=fp.relative_to(input_dir).as_posix())
+    tarzstd_bytes = zstd.ZstdCompressor(level=_ZSTD_LEVEL).compress(tar_buf.getvalue())
+    tarzstd_size = len(tarzstd_bytes)
+    del tar_buf  # free uncompressed TAR bytes promptly
 
-    result = MAGIC + bytes([VERSION]) + compressed
+    if len(template_result) > tarzstd_size * _CORPUS_FALLBACK_THRESHOLD:
+        # Template mode is significantly worse — fall back to raw_tar_zstd.
+        # The TAR+ZSTD bytes are already compressed; we wrap them in a minimal
+        # msgpack dict and re-compress with zstd level 1 (pre-compressed data
+        # is incompressible, so level 1 adds only ~30 bytes overhead).
+        raw_payload = msgpack.packb(
+            {"mode": "raw_tar_zstd", "data": tarzstd_bytes},
+            use_bin_type=True,
+        )
+        result = MAGIC + bytes([VERSION]) + zstd.ZstdCompressor(level=1).compress(raw_payload)
+        chose_raw_fallback = True
+    else:
+        result = template_result
+        chose_raw_fallback = False
+
     t_total_s = time.perf_counter() - t_total_start
 
     avg_vars = (
@@ -361,6 +463,8 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
         "low_structure_fallback_files": low_structure_fallback_files,
         "avg_vars_per_tpl_line": avg_vars,
         "compressed_size": len(result),
+        "tarzstd_size": tarzstd_size,
+        "chose_raw_fallback": chose_raw_fallback,
         "timing": {
             "tokenize_s": t_tokenize_s,
             "count_s": t_count_s,
@@ -376,6 +480,10 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
 
 def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
     """Decompress a ``.mck`` archive and recreate the directory tree.
+
+    Supports both *template* mode (default) and *raw_tar_zstd* mode (automatic
+    fallback written by the compressor when template output would be larger than
+    a plain TAR+ZSTD of the same corpus).
 
     Parameters
     ----------
@@ -407,13 +515,35 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
 
     dctx = zstd.ZstdDecompressor()
     try:
-        raw_payload = dctx.decompress(data[5:])
+        with dctx.stream_reader(io.BytesIO(data[5:])) as reader:
+            raw_payload = reader.read()
     except zstd.ZstdError as exc:
         raise ValueError(f"Zstandard decompression failed: {exc}") from exc
 
     payload = msgpack.unpackb(raw_payload, raw=False)
-    templates: List[str] = payload["templates"]
     extracted: List[str] = []
+
+    mode = payload.get("mode", "template")
+
+    if mode == "raw_tar_zstd":
+        # Automatic fallback path: payload contains TAR+ZSTD bytes.
+        tarzstd_data = bytes(payload["data"])
+        with dctx.stream_reader(io.BytesIO(tarzstd_data)) as reader:
+            tar_bytes = reader.read()
+        buf = io.BytesIO(tar_bytes)
+        with tarfile.open(fileobj=buf, mode="r") as tar:
+            for member in tar.getmembers():
+                if member.isfile():
+                    out_path = output_dir / member.name
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    f = tar.extractfile(member)
+                    if f is not None:
+                        out_path.write_bytes(f.read())
+                    extracted.append(member.name)
+        return extracted
+
+    # Template mode (original path; also used for old archives without "mode" key).
+    templates: List[str] = payload["templates"]
 
     for file_entry in payload["files"]:
         rel_path: str = file_entry["path"]

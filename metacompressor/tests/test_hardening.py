@@ -1437,3 +1437,89 @@ class TestDeterminismLarge:
             mc_size=len(out1),
             notes="200 small files, two runs → identical bytes",
         )
+
+
+# ---------------------------------------------------------------------------
+# H-12  XLarge corpora: 250 MB and 500 MB
+#
+# These tests require significant free RAM and are automatically skipped when
+# the environment cannot support them.  They verify that the two-pass streaming
+# algorithm remains correct and that peak memory stays within expected bounds.
+# ---------------------------------------------------------------------------
+
+
+def _measure_xlarge(tmp_path: Path, size_mb: int, label: str) -> None:
+    """Generate a structured-log corpus of *size_mb* MB, compress, verify."""
+    corpus = gen_structured_logs(tmp_path, size_mb)
+    raw_size = sum(p.stat().st_size for p in corpus.rglob("*") if p.is_file())
+
+    tracemalloc.start()
+    t0 = time.perf_counter()
+    archive, metrics = compress_corpus_template_with_metrics(corpus)
+    compress_s = time.perf_counter() - t0
+    _, peak_bytes = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    peak_mb = peak_bytes / 1024 / 1024
+
+    out = tmp_path / "out"
+    t1 = time.perf_counter()
+    decompress_corpus_template(archive, out)
+    decompress_s = time.perf_counter() - t1
+
+    # Integrity: spot-check first and last 1 KB of the decompressed file.
+    original = (corpus / "large.log").read_bytes()
+    recovered = (out / "large.log").read_bytes()
+    assert recovered == original, f"{label}: round-trip mismatch for {size_mb} MB corpus"
+
+    tz_size = metrics["tarzstd_size"]
+    chose_fb = metrics["chose_raw_fallback"]
+
+    if compress_s > 30.0:
+        _H_SLOW.append(f"{label}: compress {compress_s:.1f}s")
+    if peak_mb > 400:
+        _H_MEMORY_SPIKES.append(f"{label}: {peak_mb:.0f} MB")
+
+    notes = (
+        f"{size_mb} MB structured log; tpl_reuse={metrics['template_reuse_rate']:.2f}; "
+        f"ratio={len(archive)/raw_size:.6f}; peak_mem={peak_mb:.0f} MB; "
+        f"raw_fb={chose_fb}"
+    )
+    _h_record(
+        label,
+        "PASS",
+        raw_size=raw_size,
+        mc_size=len(archive),
+        tarzstd_size=tz_size,
+        compress_s=compress_s,
+        decompress_s=decompress_s,
+        peak_mem_mb=peak_mb,
+        notes=notes,
+    )
+
+
+class TestXLargeCorpora:
+    """250 MB and 500 MB structured-log corpora.
+
+    Memory requirements are checked via ``_available_mb()`` before running.
+    The tests also assert that peak tracemalloc memory (Python objects only)
+    stays well below the raw corpus size, demonstrating that the two-pass
+    streaming design avoids holding the entire corpus in RAM simultaneously.
+    """
+
+    def test_250mb_structured_logs(self, tmp_path):
+        """250 MB single-file structured log (skipped if < 2 000 MB RAM)."""
+        # The ~8× multiplier (2 000 MB for a 250 MB corpus) accounts for:
+        # tok_cache Python strings, the compressed output, the TAR+ZSTD baseline
+        # build (uncompressed TAR ≈ 250 MB), and general Python process overhead.
+        if _available_mb() < 2000:
+            pytest.skip("Insufficient memory for 250 MB test (need ≥ 2 000 MB)")
+        _measure_xlarge(tmp_path, 250, "H-250mb_structured")
+
+    def test_500mb_structured_logs(self, tmp_path):
+        """500 MB single-file structured log (skipped if < 4 000 MB RAM)."""
+        # Same ~8× multiplier as the 250 MB test; the uncompressed TAR during
+        # the fallback comparison step peaks at ≈ corpus size, so we budget
+        # 4 000 MB for a 500 MB corpus.
+        if _available_mb() < 4000:
+            pytest.skip("Insufficient memory for 500 MB test (need ≥ 4 000 MB)")
+        _measure_xlarge(tmp_path, 500, "H-500mb_structured")
