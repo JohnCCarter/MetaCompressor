@@ -35,18 +35,21 @@ from metacompressor.corpus_template import (  # noqa: E402
     _MODE_COLUMNAR_V1,
     _MODE_RAW_TAR_ZSTD,
     _MODE_ROW_V1,
+    _LineAnalysis,
+    _analyze_line,
     _build_columnar_template_archive,
     _build_row_template_archive,
     compress_corpus_template_with_metrics,
     decompress_corpus_template,
     _template_string,
-    _tokenize,
+    _tokenize_legacy,
 )
 
 
 _RESULTS_DIR = REPO_ROOT / "results"
 _MARKDOWN_PATH = _RESULTS_DIR / "metacompressor_production_validation.md"
 _JSON_PATH = _RESULTS_DIR / "metacompressor_production_validation.json"
+_STRUCTURE_V2_REPORT_PATH = _RESULTS_DIR / "metacompressor_structure_v2_report.md"
 
 _ZSTD_LEVEL = 3
 _GZIP_LEVEL = 6
@@ -293,11 +296,14 @@ def _brotli_from_tar(tar_path: Path, output_path: Path) -> None:
         dst.write(compressor.finish())
 
 
-def _prepare_template_context(input_dir: Path) -> Dict[str, Any]:
+def _prepare_template_context(
+    input_dir: Path,
+    structure_v2_enabled: bool = True,
+) -> Dict[str, Any]:
     t_extract_start = time.perf_counter()
     all_files = _iter_files(input_dir)
     file_meta = []
-    tok_cache = {}
+    tok_cache: Dict[str, _LineAnalysis] = {}
     tpl_count = {}
     total_lines = 0
 
@@ -312,8 +318,19 @@ def _prepare_template_context(input_dir: Path) -> Dict[str, Any]:
             for line in lines:
                 total_lines += 1
                 if line not in tok_cache:
-                    tok_cache[line] = _tokenize(line)
-                template_key = tok_cache[line][0]
+                    if structure_v2_enabled:
+                        tok_cache[line] = _analyze_line(line)
+                    else:
+                        legacy_parts, legacy_values = _tokenize_legacy(line)
+                        tok_cache[line] = _LineAnalysis(
+                            template_parts=legacy_parts,
+                            values=legacy_values,
+                            normalized_skeleton=(),
+                            value_kinds=(),
+                            is_json=False,
+                            json_structure_key=(),
+                        )
+                template_key = tok_cache[line].template_parts
                 tpl_count[template_key] = tpl_count.get(template_key, 0) + 1
         except UnicodeDecodeError:
             file_meta.append((rel, True))
@@ -340,9 +357,16 @@ def _prepare_template_context(input_dir: Path) -> Dict[str, Any]:
     }
 
 
-def _compress_forced_mode(input_dir: Path, mode: str) -> Tuple[bytes, Dict[str, Any]]:
+def _compress_forced_mode(
+    input_dir: Path,
+    mode: str,
+    structure_v2_enabled: bool = True,
+) -> Tuple[bytes, Dict[str, Any]]:
     total_start = time.perf_counter()
-    context = _prepare_template_context(input_dir)
+    context = _prepare_template_context(
+        input_dir,
+        structure_v2_enabled=structure_v2_enabled,
+    )
     all_files = context["all_files"]
     file_meta = context["file_meta"]
     tok_cache = context["tok_cache"]
@@ -398,9 +422,17 @@ def _compress_forced_mode(input_dir: Path, mode: str) -> Tuple[bytes, Dict[str, 
         "num_shared_templates": len(tpl_strings),
         "template_reuse_count": template_reuse_count,
         "template_reuse_rate": reuse_rate,
+        "structure_v2_enabled": structure_v2_enabled,
+        "json_lines_detected": 0,
+        "json_template_count": 0,
+        "normalized_template_count": len(tpl_strings),
+        "fuzzy_merge_count": 0,
+        "template_reuse_before": reuse_rate,
+        "template_reuse_after": reuse_rate,
         "raw_fallback_lines": stats["raw_fallback_lines"],
         "binary_fallback_files": stats["binary_fallback_files"],
         "low_structure_fallback_files": stats["low_structure_fallback_files"],
+        "fallback_reason_counts": stats.get("fallback_reason_counts", {}),
         "avg_vars_per_tpl_line": avg_vars,
         "compressed_size": len(archive),
         "tarzstd_size": None,
@@ -427,14 +459,30 @@ def _compress_forced_mode(input_dir: Path, mode: str) -> Tuple[bytes, Dict[str, 
     return archive, metrics
 
 
-def _run_mc_mode(input_dir: Path, mode: str, work_dir: Path) -> Dict[str, Any]:
+def _run_mc_mode(
+    input_dir: Path,
+    mode: str,
+    work_dir: Path,
+    structure_v2_enabled: bool = True,
+) -> Dict[str, Any]:
     work_dir.mkdir(parents=True, exist_ok=True)
     if mode == "auto":
-        compress_func = lambda: compress_corpus_template_with_metrics(input_dir)
+        compress_func = lambda: compress_corpus_template_with_metrics(
+            input_dir,
+            structure_v2_enabled=structure_v2_enabled,
+        )
     elif mode == _MODE_ROW_V1:
-        compress_func = lambda: _compress_forced_mode(input_dir, _MODE_ROW_V1)
+        compress_func = lambda: _compress_forced_mode(
+            input_dir,
+            _MODE_ROW_V1,
+            structure_v2_enabled=structure_v2_enabled,
+        )
     elif mode == _MODE_COLUMNAR_V1:
-        compress_func = lambda: _compress_forced_mode(input_dir, _MODE_COLUMNAR_V1)
+        compress_func = lambda: _compress_forced_mode(
+            input_dir,
+            _MODE_COLUMNAR_V1,
+            structure_v2_enabled=structure_v2_enabled,
+        )
     else:
         raise ValueError("unsupported MC mode: %s" % mode)
 
@@ -1038,9 +1086,17 @@ def _measure_dataset(dataset_dir: Path, spec: DatasetSpec, work_dir: Path) -> Di
         work_dir / "mc_columnar",
     )
     methods["mc_final_selected"] = _run_mc_mode(dataset_dir, "auto", work_dir / "mc_final")
+    methods["mc_before_selected"] = _run_mc_mode(
+        dataset_dir,
+        "auto",
+        work_dir / "mc_before",
+        structure_v2_enabled=False,
+    )
 
     tar_size = methods["tar_zstd"]["size"]  # type: ignore[index]
     zstd_size = methods["zstd_per_file"]["size"]  # type: ignore[index]
+    before_metrics = methods["mc_before_selected"]["metrics"]  # type: ignore[index]
+    before_size = methods["mc_before_selected"]["size"]  # type: ignore[index]
     final_metrics = methods["mc_final_selected"]["metrics"]  # type: ignore[index]
     final_size = methods["mc_final_selected"]["size"]  # type: ignore[index]
 
@@ -1048,6 +1104,7 @@ def _measure_dataset(dataset_dir: Path, spec: DatasetSpec, work_dir: Path) -> Di
     total_column_count = sum(column_encoding_counts.values())
     delta_tar_pct = _delta_pct(final_size, tar_size)
     delta_zstd_pct = _delta_pct(final_size, zstd_size)
+    before_delta_tar_pct = _delta_pct(before_size, tar_size)
     raw_reduction_pct = _raw_reduction_pct(raw_size, final_size)
 
     return {
@@ -1059,14 +1116,23 @@ def _measure_dataset(dataset_dir: Path, spec: DatasetSpec, work_dir: Path) -> Di
         "methods": methods,
         "mc_summary": {
             "selected_mode": final_metrics["final_selected_mode"],
+            "before_selected_mode": before_metrics["final_selected_mode"],
             "fallback_triggered": bool(final_metrics["chose_raw_fallback"]),
             "template_count": final_metrics["num_shared_templates"],
             "template_reuse_rate": final_metrics["template_reuse_rate"],
+            "template_reuse_before": final_metrics["template_reuse_before"],
+            "template_reuse_after": final_metrics["template_reuse_after"],
+            "json_lines_detected": final_metrics["json_lines_detected"],
+            "json_template_count": final_metrics["json_template_count"],
+            "normalized_template_count": final_metrics["normalized_template_count"],
+            "fuzzy_merge_count": final_metrics["fuzzy_merge_count"],
+            "fallback_reason_counts": final_metrics["fallback_reason_counts"],
             "column_count": total_column_count,
             "column_encoding_counts": column_encoding_counts,
             "raw_fallback_lines": final_metrics["raw_fallback_lines"],
             "raw_fallback_files": final_metrics["low_structure_fallback_files"],
             "binary_fallback_files": final_metrics["binary_fallback_files"],
+            "before_delta_vs_tar_zstd_pct": before_delta_tar_pct,
             "delta_vs_tar_zstd_pct": delta_tar_pct,
             "delta_vs_zstd_per_file_pct": delta_zstd_pct,
             "reduction_vs_raw_pct": raw_reduction_pct,
@@ -1306,15 +1372,23 @@ def _build_markdown_report(
             "- Realism: %s" % result["realism"],
             "- Raw size: %s" % _fmt_bytes(result["raw_size"]),
             "- Selected MC mode: `%s`" % summary["selected_mode"],
+            "- Before Δ vs TAR+ZSTD: %s" % _fmt_pct(summary["before_delta_vs_tar_zstd_pct"]),
             "- Delta vs TAR+ZSTD: %s" % _fmt_pct(summary["delta_vs_tar_zstd_pct"]),
             "- Delta vs ZSTD per-file: %s" % _fmt_pct(summary["delta_vs_zstd_per_file_pct"]),
             "- Raw reduction: %s" % _fmt_pct(summary["reduction_vs_raw_pct"]),
             "- Template count: %d" % summary["template_count"],
+            "- JSON lines detected: %d" % summary["json_lines_detected"],
+            "- JSON template count: %d" % summary["json_template_count"],
+            "- Normalized template count: %d" % summary["normalized_template_count"],
+            "- Fuzzy merge count: %d" % summary["fuzzy_merge_count"],
+            "- Template reuse before: %s" % _fmt_pct(summary["template_reuse_before"] * 100.0),
             "- Template reuse rate: %s" % _fmt_pct(summary["template_reuse_rate"] * 100.0),
+            "- Template reuse after: %s" % _fmt_pct(summary["template_reuse_after"] * 100.0),
             "- Column count: %d" % summary["column_count"],
             "- Column encodings: `%s`" % json.dumps(summary["column_encoding_counts"], sort_keys=True),
             "- Low-structure fallback files: %d" % summary["raw_fallback_files"],
             "- Binary fallback files: %d" % summary["binary_fallback_files"],
+            "- Fallback reasons: `%s`" % json.dumps(summary["fallback_reason_counts"], sort_keys=True),
             "",
             "| Method | Size | Ratio | Δ vs TAR+ZSTD | Compress s | Decompress s | Peak MB |",
             "|---|---:|---:|---:|---:|---:|---:|",
@@ -1362,6 +1436,30 @@ def _build_markdown_report(
     return "\n".join(lines) + "\n"
 
 
+def _build_structure_v2_report(dataset_results: List[Dict[str, Any]]) -> str:
+    lines = [
+        "# MetaCompressor Structure Extraction v2 Report",
+        "",
+        "| Dataset | Before Δ vs TAR+ZSTD | After Δ vs TAR+ZSTD | Reuse Before | Reuse After | Mode | Verdict |",
+        "|---|---:|---:|---:|---:|---|---|",
+    ]
+    for result in dataset_results:
+        summary = result["mc_summary"]
+        lines.append(
+            "| %s | %s | %s | %s | %s | %s | %s |"
+            % (
+                result["name"],
+                _fmt_pct(summary["before_delta_vs_tar_zstd_pct"]),
+                _fmt_pct(summary["delta_vs_tar_zstd_pct"]),
+                _fmt_pct(summary["template_reuse_before"] * 100.0),
+                _fmt_pct(summary["template_reuse_after"] * 100.0),
+                _mode_label(summary["selected_mode"]),
+                summary["verdict"],
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
 def run_validation(output_dir: Optional[Path] = None, include_very_large: bool = True) -> Dict[str, Any]:
     dataset_results: List[Dict[str, Any]] = []
     brotli_available = _brotli_available()
@@ -1397,8 +1495,13 @@ def run_validation(output_dir: Optional[Path] = None, include_very_large: bool =
         output_dir = _RESULTS_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
     markdown = _build_markdown_report(dataset_results, final_verdict, brotli_available)
+    structure_v2_markdown = _build_structure_v2_report(dataset_results)
     (output_dir / _JSON_PATH.name).write_text(_json_dumps(payload) + "\n", encoding="utf-8")
     (output_dir / _MARKDOWN_PATH.name).write_text(markdown, encoding="utf-8")
+    (output_dir / _STRUCTURE_V2_REPORT_PATH.name).write_text(
+        structure_v2_markdown,
+        encoding="utf-8",
+    )
     return payload
 
 

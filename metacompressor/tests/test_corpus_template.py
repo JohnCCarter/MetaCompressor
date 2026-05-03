@@ -13,6 +13,7 @@ import zstandard as zstd
 from metacompressor.corpus_template import (
     MAGIC,
     VERSION,
+    _tokenize,
     compress_corpus_template,
     compress_corpus_template_with_metrics,
     decompress_corpus_template,
@@ -211,10 +212,15 @@ class TestMetrics:
         _, metrics = compress_corpus_template_with_metrics(corpus_dir)
 
         expected_keys = {
+            "structure_v2_enabled",
             "num_files", "num_lines", "num_shared_templates",
             "template_reuse_count", "template_reuse_rate",
+            "json_lines_detected", "json_template_count",
+            "normalized_template_count", "fuzzy_merge_count",
+            "template_reuse_before", "template_reuse_after",
             "raw_fallback_lines", "binary_fallback_files",
             "low_structure_fallback_files",
+            "fallback_reason_counts",
             "avg_vars_per_tpl_line", "compressed_size",
             "tarzstd_size", "chose_raw_fallback", "timing",
             "columnar_enabled", "num_columnar_templates",
@@ -300,6 +306,62 @@ class TestMetrics:
         data_plain = compress_corpus_template(corpus_dir)
         data_with_metrics, _ = compress_corpus_template_with_metrics(corpus_dir)
         assert data_plain == data_with_metrics
+
+    def test_structure_v2_metrics_detect_json_and_reuse_improvement(self, tmp_path):
+        files = {
+            "events.ndjson": (
+                b'{"service":"api","status":200,"request_id":"user-1","path":"/v1/ping"}\n'
+                b'{"service":"api","status":500,"request_id":"user-2","path":"/v1/ping"}\n'
+            )
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["structure_v2_enabled"] is True
+        assert metrics["json_lines_detected"] >= 2
+        assert metrics["json_template_count"] >= 1
+        assert metrics["template_reuse_after"] >= metrics["template_reuse_before"]
+        assert isinstance(metrics["fallback_reason_counts"], dict)
+
+
+class TestStructureExtractionV2:
+    def test_json_ndjson_round_trip_preserves_exact_bytes(self, tmp_path):
+        files = {
+            "events.ndjson": (
+                b'{"service":"api","status":200,"request_id":"user-1","path":"/v1/ping"}\n'
+                b'{"service":"api","status":500,"request_id":"user-2","path":"/v1/ping"}\n'
+            ),
+            "config.json": (
+                b'{"timeout":30,"retries":3,"enabled":true,"owner":"ops@example.com"}'
+            ),
+        }
+        assert round_trip(tmp_path, files) == files
+
+    def test_json_structure_extraction_beats_legacy_reuse_for_ndjson(self, tmp_path):
+        files = {
+            "events.ndjson": b"".join(
+                (
+                    '{"ts":"2026-01-01T00:00:%02dZ","service":"api","request_id":"user-%02d","path":"/search?q=%s","status":200}\n'
+                    % (i, i, "token%s" % chr(97 + i))
+                ).encode("utf-8")
+                for i in range(20)
+            )
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["template_reuse_after"] > metrics["template_reuse_before"]
+
+    def test_variable_normalization_v2_maps_semantic_variants_to_same_template(self):
+        left = (
+            'ts=2026-01-01T00:00:00Z level=INFO request_id=req-abcdef12 user_id=user-42 '
+            'session_id=sess-1234 path=/api/v1/orders/42?expand=true email=user@example.com '
+            'ip=10.1.2.3 trace=0xabc123'
+        )
+        right = (
+            'ts=2026-01-02T11:12:13Z level=INFO request_id=req-fedcba21 user_id=user-77 '
+            'session_id=sess-9999 path=/api/v1/orders/77?expand=false email=admin@example.com '
+            'ip=10.9.8.7 trace=0xdef456'
+        )
+        assert _tokenize(left)[0] == _tokenize(right)[0]
 
 
 class TestColumnarMode:

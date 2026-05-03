@@ -632,6 +632,7 @@ def _write_hardening_report_fixture():  # noqa: PT004
 class TestLargeStructuredLogs:
     """100 MB structured log compression (skipped if memory < 800 MB)."""
 
+    @pytest.mark.medium
     def test_50mb_structured_logs(self, tmp_path):
         """50 MB single-file structured log corpus."""
         size_mb = 50
@@ -682,6 +683,7 @@ class TestLargeStructuredLogs:
             notes=notes,
         )
 
+    @pytest.mark.large
     def test_100mb_structured_logs(self, tmp_path):
         """100 MB single-file structured log corpus (skipped if < 800 MB RAM)."""
         if _available_mb() < 800:
@@ -1372,6 +1374,7 @@ class TestHardeningRegressionGate:
                 f"by {delta_pct:.1f}% – structured data regression"
             )
 
+    @pytest.mark.medium
     def test_regression_structured_50mb(self, tmp_path):
         """50 MB repetitive structured log must not regress vs TAR+ZSTD."""
         corpus = gen_structured_logs(tmp_path, 50)
@@ -1506,6 +1509,7 @@ class TestXLargeCorpora:
     streaming design avoids holding the entire corpus in RAM simultaneously.
     """
 
+    @pytest.mark.large
     def test_250mb_structured_logs(self, tmp_path):
         """250 MB single-file structured log (skipped if < 2 000 MB RAM)."""
         # The ~8× multiplier (2 000 MB for a 250 MB corpus) accounts for:
@@ -1515,6 +1519,7 @@ class TestXLargeCorpora:
             pytest.skip("Insufficient memory for 250 MB test (need ≥ 2 000 MB)")
         _measure_xlarge(tmp_path, 250, "H-250mb_structured")
 
+    @pytest.mark.large
     def test_500mb_structured_logs(self, tmp_path):
         """500 MB single-file structured log (skipped if < 4 000 MB RAM)."""
         # Same ~8× multiplier as the 250 MB test; the uncompressed TAR during
