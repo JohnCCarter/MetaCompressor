@@ -21,5 +21,5 @@ testpaths = ["metacompressor/tests"]
 markers = [
     "small: small tests (<= 1MB datasets)",
     "medium: medium tests (<= 50MB datasets)",
-    "large: large tests (>= 100MB datasets; opt-in with RUN_LARGE_TESTS=1)",
+    "large: opt-in high-cost tests (100MB+ datasets or other long-running benchmarks; set RUN_LARGE_TESTS=1)",
 ]
