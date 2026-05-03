@@ -91,7 +91,7 @@ import re
 import tarfile
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import msgpack
 import zstandard as zstd
@@ -104,6 +104,16 @@ MAGIC = b"MCK\x00"
 VERSION = 0x01
 _ZSTD_LEVEL = 3
 _MIN_TEMPLATE_OCCURRENCES = 2
+_MODE_RAW_TAR_ZSTD = "raw_tar_zstd"
+_MODE_ROW_V1 = "corpus_template_row_v1"
+_MODE_COLUMNAR_V1 = "corpus_template_columnar_v1"
+
+_ENCODING_RAW = "raw_msgpack"
+_ENCODING_VARINT = "varint"
+_ENCODING_DELTA = "delta_varint"
+_ENCODING_DICTIONARY = "dictionary"
+_ENCODING_RLE = "rle"
+_ROW_REF_ENCODING = "delta_varint_pairs"
 
 # Automatic raw fallback: if the template-mode archive is larger than a plain
 # TAR+ZSTD of the same corpus by this factor, re-encode in ``raw_tar_zstd``
@@ -144,6 +154,7 @@ _VAR_RE = re.compile(
     r"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
     r")"
 )
+_INT_RE = re.compile(r"-?(?:0|[1-9]\d*)")
 
 
 def _tokenize(line: str) -> Tuple[Tuple[str, ...], List[str]]:
@@ -180,6 +191,572 @@ def _reconstruct_line(template_str: str, values: List[str]) -> str:
         buf.append(val)
         buf.append(parts[i + 1])
     return "".join(buf)
+
+
+def _msgpack_size(obj: Any) -> int:
+    """Return the msgpack-serialised byte size of *obj*."""
+    return len(msgpack.packb(obj, use_bin_type=True))
+
+
+def _pack_archive_payload(payload: dict, level: int = _ZSTD_LEVEL) -> bytes:
+    """Pack *payload* as an ``.mck`` archive."""
+    raw = msgpack.packb(payload, use_bin_type=True)
+    return MAGIC + bytes([VERSION]) + zstd.ZstdCompressor(level=level).compress(raw)
+
+
+def _build_tarzstd_bytes(input_dir: Path, all_files: List[Path]) -> bytes:
+    """Return a TAR+ZSTD baseline archive for *all_files*."""
+    tar_buf = io.BytesIO()
+    with tarfile.open(fileobj=tar_buf, mode="w") as tar:
+        for file_path in all_files:
+            tar.add(str(file_path), arcname=file_path.relative_to(input_dir).as_posix())
+    return zstd.ZstdCompressor(level=_ZSTD_LEVEL).compress(tar_buf.getvalue())
+
+
+def _build_raw_tarzstd_archive(tarzstd_bytes: bytes) -> bytes:
+    """Wrap pre-compressed TAR+ZSTD bytes in an ``.mck`` archive."""
+    return _pack_archive_payload(
+        {"mode": _MODE_RAW_TAR_ZSTD, "data": tarzstd_bytes},
+        level=1,
+    )
+
+
+def _encode_uvarint(value: int) -> bytes:
+    """Encode a non-negative integer as an unsigned varint."""
+    if value < 0:
+        raise ValueError(
+            "unsigned varint cannot encode negative values; "
+            "use _encode_signed_varints for signed integers"
+        )
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+def _encode_uvarints(values: List[int]) -> bytes:
+    """Encode a sequence of unsigned integers as concatenated varints."""
+    out = bytearray()
+    for value in values:
+        out.extend(_encode_uvarint(value))
+    return bytes(out)
+
+
+def _decode_uvarints(data: bytes, expected_count: int) -> List[int]:
+    """Decode *expected_count* unsigned varints from *data*."""
+    values: List[int] = []
+    value = 0
+    shift = 0
+    consumed = 0
+    for byte in data:
+        consumed += 1
+        value |= (byte & 0x7F) << shift
+        if byte & 0x80:
+            shift += 7
+            continue
+        values.append(value)
+        if len(values) == expected_count:
+            break
+        value = 0
+        shift = 0
+    if len(values) != expected_count:
+        raise ValueError(
+            "Corrupt column encoding: "
+            f"expected {expected_count} values but decoded {len(values)}"
+        )
+    if consumed != len(data):
+        raise ValueError("Corrupt column encoding: unconsumed bytes in varint data")
+    return values
+
+
+def _zigzag_encode(value: int) -> int:
+    """Encode a signed integer for unsigned varint transport."""
+    return value * 2 if value >= 0 else (-value * 2) - 1
+
+
+def _zigzag_decode(value: int) -> int:
+    """Decode a zigzag-encoded integer."""
+    # Standard zigzag decode: even values decode via ``value >> 1`` and odd
+    # values decode via ``-((value >> 1) + 1)``.
+    return (value >> 1) ^ -(value & 1)
+
+
+def _encode_signed_varints(values: List[int]) -> bytes:
+    """Encode signed integers as concatenated zigzag varints."""
+    return _encode_uvarints([_zigzag_encode(value) for value in values])
+
+
+def _decode_signed_varints(data: bytes, expected_count: int) -> List[int]:
+    """Decode *expected_count* signed zigzag varints from *data*."""
+    return [_zigzag_decode(value) for value in _decode_uvarints(data, expected_count)]
+
+
+def _canonical_int_values(values: List[str]) -> Optional[List[int]]:
+    """Return integer values when each token round-trips canonically via ``str(int)``."""
+    ints: List[int] = []
+    for value in values:
+        if not isinstance(value, str) or not _INT_RE.fullmatch(value):
+            return None
+        parsed = int(value)
+        if str(parsed) != value:
+            return None
+        ints.append(parsed)
+    return ints
+
+
+def _is_delta_friendly(values: List[int]) -> bool:
+    """Heuristic for whether delta encoding is worth attempting."""
+    if len(values) < 2:
+        return False
+    deltas = [values[i] - values[i - 1] for i in range(1, len(values))]
+    delta_count = len(deltas)
+    monotonic_ratio = max(
+        sum(1 for delta in deltas if delta >= 0),
+        sum(1 for delta in deltas if delta <= 0),
+    ) / delta_count
+    small_step_ratio = sum(1 for delta in deltas if abs(delta) <= 16) / delta_count
+    return monotonic_ratio >= 0.9 or small_step_ratio >= 0.9
+
+
+def _encode_column(values: List[str]) -> dict:
+    """Choose the smallest deterministic column encoding."""
+    raw_data = msgpack.packb(values, use_bin_type=True)
+    best = {"encoding": _ENCODING_RAW, "data": raw_data}
+    best_size = _msgpack_size(best)
+
+    int_values = _canonical_int_values(values)
+    if int_values is not None:
+        candidate = {
+            "encoding": _ENCODING_VARINT,
+            "data": _encode_signed_varints(int_values),
+        }
+        candidate_size = _msgpack_size(candidate)
+        if candidate_size < best_size:
+            best = candidate
+            best_size = candidate_size
+
+        if _is_delta_friendly(int_values):
+            deltas = [int_values[0]]
+            deltas.extend(
+                int_values[i] - int_values[i - 1] for i in range(1, len(int_values))
+            )
+            candidate = {
+                "encoding": _ENCODING_DELTA,
+                "data": _encode_signed_varints(deltas),
+            }
+            candidate_size = _msgpack_size(candidate)
+            if candidate_size < best_size:
+                best = candidate
+                best_size = candidate_size
+
+    if values:
+        dictionary: List[str] = []
+        dictionary_ids: Dict[str, int] = {}
+        indices: List[int] = []
+        for value in values:
+            if value not in dictionary_ids:
+                dictionary_ids[value] = len(dictionary)
+                dictionary.append(value)
+            indices.append(dictionary_ids[value])
+        if len(dictionary) < len(values):
+            candidate = {
+                "encoding": _ENCODING_DICTIONARY,
+                "dictionary": dictionary,
+                "indices": _encode_uvarints(indices),
+            }
+            candidate_size = _msgpack_size(candidate)
+            if candidate_size < best_size:
+                best = candidate
+                best_size = candidate_size
+
+        run_values: List[str] = []
+        run_counts: List[int] = []
+        last_value: Optional[str] = None
+        for value in values:
+            if last_value is not None and value == last_value:
+                run_counts[-1] += 1
+            else:
+                run_values.append(value)
+                run_counts.append(1)
+                last_value = value
+        if len(run_values) < len(values):
+            candidate = {
+                "encoding": _ENCODING_RLE,
+                "values": run_values,
+                "counts": _encode_uvarints(run_counts),
+            }
+            candidate_size = _msgpack_size(candidate)
+            if candidate_size < best_size:
+                best = candidate
+
+    return best
+
+
+def _decode_column(column: dict, expected_count: int) -> List[str]:
+    """Decode a column to the original string values."""
+    encoding = column["encoding"]
+    if encoding == _ENCODING_RAW:
+        values = msgpack.unpackb(bytes(column["data"]), raw=False)
+        if len(values) != expected_count:
+            raise ValueError("Corrupt column encoding: raw column length mismatch")
+        if any(not isinstance(value, str) for value in values):
+            raise ValueError("Corrupt column encoding: raw column contains non-string values")
+        return values
+
+    if encoding == _ENCODING_VARINT:
+        return [str(value) for value in _decode_signed_varints(bytes(column["data"]), expected_count)]
+
+    if encoding == _ENCODING_DELTA:
+        deltas = _decode_signed_varints(bytes(column["data"]), expected_count)
+        if not deltas:
+            return []
+        values = [deltas[0]]
+        for delta in deltas[1:]:
+            values.append(values[-1] + delta)
+        return [str(value) for value in values]
+
+    if encoding == _ENCODING_DICTIONARY:
+        dictionary = [
+            value if isinstance(value, str) else str(value)
+            for value in column["dictionary"]
+        ]
+        indices = _decode_uvarints(bytes(column["indices"]), expected_count)
+        try:
+            return [dictionary[index] for index in indices]
+        except IndexError as exc:
+            raise ValueError("Corrupt column encoding: dictionary index out of range") from exc
+
+    if encoding == _ENCODING_RLE:
+        values = [
+            value if isinstance(value, str) else str(value)
+            for value in column["values"]
+        ]
+        counts = _decode_uvarints(bytes(column["counts"]), len(values))
+        decoded: List[str] = []
+        for value, count in zip(values, counts):
+            decoded.extend([value] * count)
+        if len(decoded) != expected_count:
+            raise ValueError("Corrupt column encoding: RLE length mismatch")
+        return decoded
+
+    raise ValueError(
+        "Unsupported column encoding: "
+        f"{encoding}. Supported encodings are: "
+        f"{_ENCODING_RAW}, {_ENCODING_VARINT}, {_ENCODING_DELTA}, "
+        f"{_ENCODING_DICTIONARY}, {_ENCODING_RLE}"
+    )
+
+
+def _encode_row_refs(row_refs: List[List[int]]) -> dict:
+    """Encode ``(file_id, line_index)`` pairs compactly and deterministically."""
+    file_deltas: List[int] = []
+    line_deltas: List[int] = []
+    prev_file_id = 0
+    prev_line_index = 0
+    have_prev = False
+
+    for file_id, line_index in row_refs:
+        if have_prev:
+            file_delta = file_id - prev_file_id
+        else:
+            file_delta = file_id
+        if file_delta < 0:
+            raise ValueError(
+                "row_refs must be sorted by file_id in ascending order "
+                f"(prev_file_id={prev_file_id}, current_file_id={file_id})"
+            )
+        if have_prev and file_id == prev_file_id:
+            line_delta = line_index - prev_line_index
+        else:
+            line_delta = line_index
+        if line_delta < 0:
+            raise ValueError(
+                "row_refs line indices must be non-decreasing within each file "
+                f"(file_id={file_id}, prev_index={prev_line_index}, current_index={line_index})"
+            )
+
+        file_deltas.append(file_delta)
+        line_deltas.append(line_delta)
+        prev_file_id = file_id
+        prev_line_index = line_index
+        have_prev = True
+
+    return {
+        "encoding": _ROW_REF_ENCODING,
+        "count": len(row_refs),
+        "file_deltas": _encode_uvarints(file_deltas),
+        "line_deltas": _encode_uvarints(line_deltas),
+    }
+
+
+def _decode_row_refs(encoded_row_refs: Any) -> List[List[int]]:
+    """Decode compact row references."""
+    if isinstance(encoded_row_refs, list):
+        return encoded_row_refs
+
+    if encoded_row_refs["encoding"] != _ROW_REF_ENCODING:
+        raise ValueError(
+            f"Unsupported row_refs encoding: {encoded_row_refs['encoding']}"
+        )
+
+    count = encoded_row_refs["count"]
+    file_deltas = _decode_uvarints(bytes(encoded_row_refs["file_deltas"]), count)
+    line_deltas = _decode_uvarints(bytes(encoded_row_refs["line_deltas"]), count)
+
+    row_refs: List[List[int]] = []
+    prev_file_id = 0
+    prev_line_index = 0
+    have_prev = False
+
+    for file_delta, line_delta in zip(file_deltas, line_deltas):
+        file_id = prev_file_id + file_delta
+        if have_prev and file_id == prev_file_id:
+            line_index = prev_line_index + line_delta
+        else:
+            line_index = line_delta
+        row_refs.append([file_id, line_index])
+        prev_file_id = file_id
+        prev_line_index = line_index
+        have_prev = True
+
+    return row_refs
+
+
+def _build_row_template_archive(
+    input_dir: Path,
+    all_files: List[Path],
+    file_meta: List[Tuple[str, bool]],
+    tok_cache: Dict[str, Tuple[Tuple[str, ...], List[str]]],
+    tpl_to_id: Dict[Tuple[str, ...], int],
+    tpl_strings: List[str],
+) -> Tuple[bytes, dict]:
+    """Build the legacy row-oriented template archive."""
+    template_reuse_count = 0
+    raw_fallback_lines = 0
+    binary_fallback_files = 0
+    low_structure_fallback_files = 0
+    total_var_slots = 0
+
+    t_encode_start = time.perf_counter()
+    output = io.BytesIO()
+    output.write(MAGIC + bytes([VERSION]))
+    packer = msgpack.Packer(use_bin_type=True)
+
+    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(output, closefd=False) as compressor:
+        compressor.write(packer.pack_map_header(2))
+        compressor.write(packer.pack("templates"))
+        compressor.write(packer.pack(tpl_strings))
+        compressor.write(packer.pack("files"))
+        compressor.write(packer.pack_array_header(len(all_files)))
+
+        t_serialize_start = time.perf_counter()
+        for file_path, (rel, is_binary) in zip(all_files, file_meta):
+            raw = file_path.read_bytes()
+
+            if is_binary:
+                binary_fallback_files += 1
+                compressor.write(packer.pack({"path": rel, "records": [[-2, raw]]}))
+                continue
+
+            text = raw.decode("utf-8")
+            lines = text.split("\n")
+            records: List[Any] = []
+            file_tpl_lines = 0
+            file_raw_lines = 0
+            file_var_total = 0
+            for line in lines:
+                tkey, values = tok_cache[line]
+                if tkey in tpl_to_id:
+                    records.append([tpl_to_id[tkey], values])
+                    file_tpl_lines += 1
+                    file_var_total += len(values)
+                else:
+                    records.append([-1, line])
+                    file_raw_lines += 1
+
+            file_total_lines = len(lines)
+            file_template_rate = (
+                file_tpl_lines / file_total_lines if file_total_lines > 0 else 0.0
+            )
+            if (
+                (file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE)
+                and lines
+            ):
+                binary_fallback_files += 1
+                if file_tpl_lines > 0:
+                    low_structure_fallback_files += 1
+                raw_fallback_lines += file_raw_lines
+                compressor.write(packer.pack({"path": rel, "records": [[-2, raw]]}))
+            else:
+                template_reuse_count += file_tpl_lines
+                raw_fallback_lines += file_raw_lines
+                total_var_slots += file_var_total
+                compressor.write(packer.pack({"path": rel, "records": records}))
+
+    t_serialize_s = time.perf_counter() - t_serialize_start
+    t_encode_s = time.perf_counter() - t_encode_start
+    return output.getvalue(), {
+        "template_reuse_count": template_reuse_count,
+        "raw_fallback_lines": raw_fallback_lines,
+        "binary_fallback_files": binary_fallback_files,
+        "low_structure_fallback_files": low_structure_fallback_files,
+        "total_var_slots": total_var_slots,
+        "serialize_s": t_serialize_s,
+        "encode_s": t_encode_s,
+    }
+
+
+def _build_columnar_template_archive(
+    all_files: List[Path],
+    file_meta: List[Tuple[str, bool]],
+    tok_cache: Dict[str, Tuple[Tuple[str, ...], List[str]]],
+    tpl_to_id: Dict[Tuple[str, ...], int],
+    tpl_strings: List[str],
+) -> Tuple[bytes, dict]:
+    """Build the columnar corpus-template v1 archive."""
+    template_reuse_count = 0
+    raw_fallback_lines = 0
+    binary_fallback_files = 0
+    low_structure_fallback_files = 0
+    total_var_slots = 0
+
+    files_payload: List[dict] = []
+    raw_files: List[bytes] = []
+    raw_lines: List[List[Any]] = []
+    template_blocks: List[Optional[dict]] = [None] * len(tpl_strings)
+
+    t_encode_start = time.perf_counter()
+    for file_path, (rel, is_binary) in zip(all_files, file_meta):
+        file_id = len(files_payload)
+        raw = file_path.read_bytes()
+
+        if is_binary:
+            files_payload.append(
+                {"path": rel, "kind": "raw", "raw_file_id": len(raw_files)}
+            )
+            raw_files.append(raw)
+            binary_fallback_files += 1
+            continue
+
+        text = raw.decode("utf-8")
+        lines = text.split("\n")
+        file_tpl_records: List[Tuple[int, int, List[str]]] = []
+        file_raw_records: List[Tuple[int, str]] = []
+        file_tpl_lines = 0
+        file_raw_lines = 0
+        file_var_total = 0
+
+        for line_index, line in enumerate(lines):
+            tkey, values = tok_cache[line]
+            tpl_id = tpl_to_id.get(tkey)
+            if tpl_id is None:
+                file_raw_records.append((line_index, line))
+                file_raw_lines += 1
+            else:
+                file_tpl_records.append((line_index, tpl_id, values))
+                file_tpl_lines += 1
+                file_var_total += len(values)
+
+        file_total_lines = len(lines)
+        file_template_rate = (
+            file_tpl_lines / file_total_lines if file_total_lines > 0 else 0.0
+        )
+        if (
+            (file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE)
+            and lines
+        ):
+            files_payload.append(
+                {"path": rel, "kind": "raw", "raw_file_id": len(raw_files)}
+            )
+            raw_files.append(raw)
+            binary_fallback_files += 1
+            if file_tpl_lines > 0:
+                low_structure_fallback_files += 1
+            raw_fallback_lines += file_raw_lines
+            continue
+
+        files_payload.append({"path": rel, "kind": "text", "num_lines": len(lines)})
+        template_reuse_count += file_tpl_lines
+        raw_fallback_lines += file_raw_lines
+        total_var_slots += file_var_total
+
+        for line_index, line in file_raw_records:
+            raw_lines.append([file_id, line_index, line])
+
+        for line_index, tpl_id, values in file_tpl_records:
+            block = template_blocks[tpl_id]
+            if block is None:
+                block = {
+                    "row_refs": [],
+                    "columns": [[] for _ in range(len(values))],
+                }
+                template_blocks[tpl_id] = block
+            elif len(block["columns"]) != len(values):
+                raise ValueError(
+                    "Template column count mismatch: "
+                    f"expected {len(block['columns'])} columns but got {len(values)} "
+                    f"for template {tpl_id}"
+                )
+
+            block["row_refs"].append([file_id, line_index])
+            for column_index, value in enumerate(values):
+                block["columns"][column_index].append(value)
+
+    t_serialize_start = time.perf_counter()
+    encoded_blocks: List[Optional[dict]] = []
+    column_encoding_counts: Dict[str, int] = {}
+    num_columnar_templates = 0
+    num_encoded_columns = 0
+    raw_column_fallback_count = 0
+
+    for block in template_blocks:
+        if block is None:
+            encoded_blocks.append(None)
+            continue
+        num_columnar_templates += 1
+        encoded_columns: List[dict] = []
+        for column_values in block["columns"]:
+            encoded_column = _encode_column(column_values)
+            encoding = encoded_column["encoding"]
+            column_encoding_counts[encoding] = column_encoding_counts.get(encoding, 0) + 1
+            if encoding == _ENCODING_RAW:
+                raw_column_fallback_count += 1
+            else:
+                num_encoded_columns += 1
+            encoded_columns.append(encoded_column)
+        encoded_blocks.append(
+            {"row_refs": _encode_row_refs(block["row_refs"]), "columns": encoded_columns}
+        )
+
+    payload = {
+        "mode": _MODE_COLUMNAR_V1,
+        "templates": tpl_strings,
+        "files": files_payload,
+        "template_blocks": encoded_blocks,
+        "raw_files": raw_files,
+        "metadata": {"raw_lines": raw_lines},
+    }
+    result = _pack_archive_payload(payload)
+    t_serialize_s = time.perf_counter() - t_serialize_start
+    t_encode_s = time.perf_counter() - t_encode_start
+    return result, {
+        "template_reuse_count": template_reuse_count,
+        "raw_fallback_lines": raw_fallback_lines,
+        "binary_fallback_files": binary_fallback_files,
+        "low_structure_fallback_files": low_structure_fallback_files,
+        "total_var_slots": total_var_slots,
+        "serialize_s": t_serialize_s,
+        "encode_s": t_encode_s,
+        "num_columnar_templates": num_columnar_templates,
+        "num_encoded_columns": num_encoded_columns,
+        "column_encoding_counts": column_encoding_counts,
+        "raw_column_fallback_count": raw_column_fallback_count,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -329,90 +906,26 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
                 tpl_to_id[tkey] = len(tpl_strings)
                 tpl_strings.append(_template_string(tkey))
 
-    # -----------------------------------------------------------------------
-    # Pass 2: encode + stream output
-    #
-    # Re-read each file, encode using tok_cache and tpl_to_id, and write each
-    # encoded file entry immediately to a msgpack Packer piped into a zstd
-    # stream writer.  No in-memory accumulation of encoded_files list.
-    # -----------------------------------------------------------------------
-    template_reuse_count = 0
-    raw_fallback_lines = 0
-    binary_fallback_files = 0
-    low_structure_fallback_files = 0
-    total_var_slots = 0
+    row_result, row_stats = _build_row_template_archive(
+        input_dir=input_dir,
+        all_files=all_files,
+        file_meta=file_meta,
+        tok_cache=tok_cache,
+        tpl_to_id=tpl_to_id,
+        tpl_strings=tpl_strings,
+    )
+    columnar_result, columnar_stats = _build_columnar_template_archive(
+        all_files=all_files,
+        file_meta=file_meta,
+        tok_cache=tok_cache,
+        tpl_to_id=tpl_to_id,
+        tpl_strings=tpl_strings,
+    )
 
-    t_encode_start = time.perf_counter()
-
-    output = io.BytesIO()
-    output.write(MAGIC + bytes([VERSION]))
-    packer = msgpack.Packer(use_bin_type=True)
-    cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
-
-    with cctx.stream_writer(output, closefd=False) as compressor:
-        # Streaming msgpack map: {"templates": [...], "files": [...]}
-        # pack_map_header(2) + keys/values produces the same bytes as
-        # msgpack.packb({"templates": ..., "files": [...]}) for 2-key maps.
-        compressor.write(packer.pack_map_header(2))
-        compressor.write(packer.pack("templates"))
-        compressor.write(packer.pack(tpl_strings))
-        compressor.write(packer.pack("files"))
-        compressor.write(packer.pack_array_header(len(all_files)))
-
-        t_serialize_start = time.perf_counter()
-        for file_path, (rel, is_binary) in zip(all_files, file_meta):
-            raw = file_path.read_bytes()  # re-read for pass 2
-
-            if is_binary:
-                binary_fallback_files += 1
-                compressor.write(packer.pack({"path": rel, "records": [[-2, raw]]}))
-                continue
-
-            text = raw.decode("utf-8")
-            lines = text.split("\n")
-            records: List = []
-            file_tpl_lines = 0
-            file_raw_lines = 0
-            file_var_total = 0
-            for line in lines:
-                tkey, values = tok_cache[line]  # always a cache hit
-                if tkey in tpl_to_id:
-                    records.append([tpl_to_id[tkey], values])
-                    file_tpl_lines += 1
-                    file_var_total += len(values)
-                else:
-                    records.append([-1, line])
-                    file_raw_lines += 1
-
-            # Hybrid / low-structure fallback: store the file as raw bytes when:
-            #   (a) no lines used template mode at all, OR
-            #   (b) template usage is sparse (< _MIN_FILE_TEMPLATE_RATE).
-            # raw is already available from the re-read above.
-            file_total_lines = len(lines)
-            file_template_rate = (
-                file_tpl_lines / file_total_lines if file_total_lines > 0 else 0.0
-            )
-            if (
-                (file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE)
-                and lines
-            ):
-                binary_fallback_files += 1
-                if file_tpl_lines > 0:
-                    low_structure_fallback_files += 1
-                raw_fallback_lines += file_raw_lines
-                compressor.write(packer.pack({"path": rel, "records": [[-2, raw]]}))
-            else:
-                template_reuse_count += file_tpl_lines
-                raw_fallback_lines += file_raw_lines
-                total_var_slots += file_var_total
-                compressor.write(packer.pack({"path": rel, "records": records}))
-
-    t_serialize_s = time.perf_counter() - t_serialize_start
-    t_zstd_s = 0.0  # interleaved with serialisation inside stream_writer
-    t_encode_s = time.perf_counter() - t_encode_start
+    t_encode_s = row_stats["encode_s"] + columnar_stats["encode_s"]
+    t_serialize_s = row_stats["serialize_s"] + columnar_stats["serialize_s"]
+    t_zstd_s = 0.0
     t_extract_s = time.perf_counter() - t_extract_start
-
-    template_result = output.getvalue()
 
     # -----------------------------------------------------------------------
     # Smart fallback: TAR+ZSTD comparison
@@ -422,31 +935,34 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
     # re-encode as raw_tar_zstd mode so the caller never receives an archive
     # worse than TAR+ZSTD by more than a few dozen bytes of MCK overhead.
     # -----------------------------------------------------------------------
-    tar_buf = io.BytesIO()
-    with tarfile.open(fileobj=tar_buf, mode="w") as tar:
-        for fp in all_files:
-            tar.add(str(fp), arcname=fp.relative_to(input_dir).as_posix())
-    tarzstd_bytes = zstd.ZstdCompressor(level=_ZSTD_LEVEL).compress(tar_buf.getvalue())
+    tarzstd_bytes = _build_tarzstd_bytes(input_dir, all_files)
     tarzstd_size = len(tarzstd_bytes)
-    del tar_buf  # free uncompressed TAR bytes promptly
 
-    if len(template_result) > tarzstd_size * _CORPUS_FALLBACK_THRESHOLD:
-        # Template mode is significantly worse — fall back to raw_tar_zstd.
-        # The TAR+ZSTD bytes are already compressed; we wrap them in a minimal
-        # msgpack dict and re-compress with zstd level 1 (pre-compressed data
-        # is incompressible, so level 1 adds only ~30 bytes overhead).
-        raw_payload = msgpack.packb(
-            {"mode": "raw_tar_zstd", "data": tarzstd_bytes},
-            use_bin_type=True,
-        )
-        result = MAGIC + bytes([VERSION]) + zstd.ZstdCompressor(level=1).compress(raw_payload)
+    row_mode_size = len(row_result)
+    columnar_size = len(columnar_result)
+    if columnar_size < row_mode_size:
+        best_template_result = columnar_result
+        best_template_mode = _MODE_COLUMNAR_V1
+    else:
+        best_template_result = row_result
+        best_template_mode = _MODE_ROW_V1
+
+    if len(best_template_result) > tarzstd_size * _CORPUS_FALLBACK_THRESHOLD:
+        result = _build_raw_tarzstd_archive(tarzstd_bytes)
+        final_selected_mode = _MODE_RAW_TAR_ZSTD
         chose_raw_fallback = True
     else:
-        result = template_result
+        result = best_template_result
+        final_selected_mode = best_template_mode
         chose_raw_fallback = False
 
     t_total_s = time.perf_counter() - t_total_start
 
+    template_reuse_count = row_stats["template_reuse_count"]
+    raw_fallback_lines = row_stats["raw_fallback_lines"]
+    binary_fallback_files = row_stats["binary_fallback_files"]
+    low_structure_fallback_files = row_stats["low_structure_fallback_files"]
+    total_var_slots = row_stats["total_var_slots"]
     avg_vars = (
         total_var_slots / template_reuse_count if template_reuse_count > 0 else 0.0
     )
@@ -465,6 +981,15 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
         "compressed_size": len(result),
         "tarzstd_size": tarzstd_size,
         "chose_raw_fallback": chose_raw_fallback,
+        "columnar_enabled": True,
+        "num_columnar_templates": columnar_stats["num_columnar_templates"],
+        "num_encoded_columns": columnar_stats["num_encoded_columns"],
+        "column_encoding_counts": columnar_stats["column_encoding_counts"],
+        "raw_column_fallback_count": columnar_stats["raw_column_fallback_count"],
+        "columnar_size": columnar_size,
+        "row_mode_size": row_mode_size,
+        "columnar_savings_vs_row": row_mode_size - columnar_size,
+        "final_selected_mode": final_selected_mode,
         "timing": {
             "tokenize_s": t_tokenize_s,
             "count_s": t_count_s,
@@ -525,7 +1050,7 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
 
     mode = payload.get("mode", "template")
 
-    if mode == "raw_tar_zstd":
+    if mode == _MODE_RAW_TAR_ZSTD:
         # Automatic fallback path: payload contains TAR+ZSTD bytes.
         tarzstd_data = bytes(payload["data"])
         with dctx.stream_reader(io.BytesIO(tarzstd_data)) as reader:
@@ -540,6 +1065,63 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
                     if f is not None:
                         out_path.write_bytes(f.read())
                     extracted.append(member.name)
+        return extracted
+
+    if mode == _MODE_COLUMNAR_V1:
+        templates: List[str] = payload["templates"]
+        files = payload["files"]
+        raw_files = [bytes(data) for data in payload.get("raw_files", [])]
+        raw_lines = payload.get("metadata", {}).get("raw_lines", [])
+        file_lines: List[Optional[List[Optional[str]]]] = []
+
+        for file_entry in files:
+            if file_entry["kind"] == "raw":
+                file_lines.append(None)
+            else:
+                file_lines.append([None] * file_entry["num_lines"])
+
+        for file_id, line_index, line in raw_lines:
+            lines = file_lines[file_id]
+            if lines is None:
+                raise ValueError("Corrupt columnar archive: raw line for raw file")
+            lines[line_index] = line
+
+        for tpl_id, block in enumerate(payload["template_blocks"]):
+            if block is None:
+                continue
+            row_refs = _decode_row_refs(block["row_refs"])
+            row_count = len(row_refs)
+            decoded_columns = [
+                _decode_column(column, row_count)
+                for column in block["columns"]
+            ]
+            for row_index, row_ref in enumerate(row_refs):
+                file_id, line_index = row_ref
+                values = [
+                    decoded_columns[column_index][row_index]
+                    for column_index in range(len(decoded_columns))
+                ]
+                lines = file_lines[file_id]
+                if lines is None:
+                    raise ValueError("Corrupt columnar archive: template row for raw file")
+                lines[line_index] = _reconstruct_line(templates[tpl_id], values)
+
+        for file_id, file_entry in enumerate(files):
+            rel_path = file_entry["path"]
+            if file_entry["kind"] == "raw":
+                file_bytes = raw_files[file_entry["raw_file_id"]]
+            else:
+                lines = file_lines[file_id]
+                if lines is None:
+                    raise ValueError("Corrupt columnar archive: incomplete file reconstruction")
+                if any(line is None for line in lines):
+                    raise ValueError("Corrupt columnar archive: incomplete file reconstruction")
+                file_bytes = "\n".join(lines).encode("utf-8")
+
+            out_path = output_dir / rel_path
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(file_bytes)
+            extracted.append(rel_path)
         return extracted
 
     # Template mode (original path; also used for old archives without "mode" key).

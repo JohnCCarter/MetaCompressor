@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import os
+import io
 from pathlib import Path
 
+import msgpack
 import pytest
+import zstandard as zstd
 
 from metacompressor.corpus_template import (
+    MAGIC,
+    VERSION,
     compress_corpus_template,
+    compress_corpus_template_with_metrics,
     decompress_corpus_template,
 )
 
@@ -36,6 +42,14 @@ def round_trip(tmp_path: Path, files: dict) -> dict:
         rel.replace("\\", "/"): (out_dir / rel).read_bytes()
         for rel in files
     }
+
+
+def unpack_payload(archive: bytes) -> dict:
+    assert archive[:4] == MAGIC
+    assert archive[4] == VERSION
+    with zstd.ZstdDecompressor().stream_reader(io.BytesIO(archive[5:])) as reader:
+        raw_payload = reader.read()
+    return msgpack.unpackb(raw_payload, raw=False)
 
 
 # ---------------------------------------------------------------------------
@@ -192,8 +206,6 @@ class TestDeterminism:
 
 class TestMetrics:
     def test_metrics_keys_present(self, tmp_path):
-        from metacompressor.corpus_template import compress_corpus_template_with_metrics
-
         files = {"a.log": b"INFO val=1\nINFO val=2\n" * 30}
         corpus_dir = make_corpus(tmp_path, files)
         _, metrics = compress_corpus_template_with_metrics(corpus_dir)
@@ -205,6 +217,11 @@ class TestMetrics:
             "low_structure_fallback_files",
             "avg_vars_per_tpl_line", "compressed_size",
             "tarzstd_size", "chose_raw_fallback", "timing",
+            "columnar_enabled", "num_columnar_templates",
+            "num_encoded_columns", "column_encoding_counts",
+            "raw_column_fallback_count", "columnar_size",
+            "row_mode_size", "columnar_savings_vs_row",
+            "final_selected_mode",
         }
         assert expected_keys.issubset(metrics.keys())
 
@@ -283,6 +300,155 @@ class TestMetrics:
         data_plain = compress_corpus_template(corpus_dir)
         data_with_metrics, _ = compress_corpus_template_with_metrics(corpus_dir)
         assert data_plain == data_with_metrics
+
+
+class TestColumnarMode:
+    def test_columnar_round_trip(self, tmp_path):
+        files = {
+            "a.log": b"".join(
+                f"INFO seq={i} status={i % 5} user={i % 9} code={200 + (i % 3)}\n".encode()
+                for i in range(500)
+            ),
+            "b.log": b"".join(
+                f"INFO seq={i + 500} status={i % 5} user={i % 9} code={200 + (i % 3)}\n".encode()
+                for i in range(500)
+            ),
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["final_selected_mode"] == "corpus_template_columnar_v1"
+
+        out_dir = tmp_path / "out"
+        decompress_corpus_template(archive, out_dir)
+        for rel, data in files.items():
+            assert (out_dir / rel).read_bytes() == data
+
+        payload = unpack_payload(archive)
+        assert payload["mode"] == "corpus_template_columnar_v1"
+        assert "template_blocks" in payload
+
+    def test_columnar_output_is_deterministic(self, tmp_path):
+        files = {
+            "a.log": b"INFO seq=1 status=200\nINFO seq=2 status=200\n" * 120,
+            "b.log": b"INFO seq=100 status=500\nINFO seq=101 status=500\n" * 120,
+        }
+        dir1 = make_corpus(tmp_path / "run1", files)
+        dir2 = make_corpus(tmp_path / "run2", files)
+
+        archive1, metrics1 = compress_corpus_template_with_metrics(dir1)
+        archive2, metrics2 = compress_corpus_template_with_metrics(dir2)
+
+        assert metrics1["final_selected_mode"] == "corpus_template_columnar_v1"
+        assert metrics2["final_selected_mode"] == "corpus_template_columnar_v1"
+        assert archive1 == archive2
+
+    def test_old_row_mode_archive_still_decompresses(self, tmp_path):
+        payload = {
+            "templates": ["INFO seq={} status={}"],
+            "files": [
+                {
+                    "path": "legacy.log",
+                    "records": [[0, ["1", "200"]], [0, ["2", "404"]]],
+                }
+            ],
+        }
+        archive = (
+            MAGIC
+            + bytes([VERSION])
+            + zstd.ZstdCompressor(level=3).compress(
+                msgpack.packb(payload, use_bin_type=True)
+            )
+        )
+
+        out_dir = tmp_path / "out"
+        extracted = decompress_corpus_template(archive, out_dir)
+
+        assert extracted == ["legacy.log"]
+        assert (out_dir / "legacy.log").read_bytes() == b"INFO seq=1 status=200\nINFO seq=2 status=404"
+
+    def test_integer_column_delta_encoding(self, tmp_path):
+        files = {"seq.log": b"".join(f"INFO seq={i}\n".encode() for i in range(400))}
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["column_encoding_counts"].get("delta_varint", 0) >= 1
+
+    def test_integer_column_varint_encoding(self, tmp_path):
+        values = [i if i % 2 == 0 else 10_000_000 - i for i in range(400)]
+        files = {
+            "varint.log": b"".join(f"INFO seq={value}\n".encode() for value in values)
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["column_encoding_counts"].get("varint", 0) >= 1
+
+    def test_string_dictionary_encoding(self, tmp_path):
+        urls = [b"https://example.com/a", b"https://example.com/b"] * 150
+        files = {
+            "urls.log": b"".join(b"INFO url=" + url + b"\n" for url in urls)
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["column_encoding_counts"].get("dictionary", 0) >= 1
+
+    def test_rle_encoding(self, tmp_path):
+        urls = ([b"https://example.com/a"] * 120) + ([b"https://example.com/b"] * 120)
+        files = {
+            "rle.log": b"".join(b"INFO url=" + url + b"\n" for url in urls)
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["column_encoding_counts"].get("rle", 0) >= 1
+
+    def test_raw_column_fallback_when_specialized_is_larger(self, tmp_path):
+        urls = [
+            b"https://example.com/item/" + f"{i:04d}".encode()
+            for i in range(200)
+        ]
+        files = {
+            "rawcol.log": b"".join(b"INFO url=" + url + b"\n" for url in urls)
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["raw_column_fallback_count"] >= 1
+        assert metrics["column_encoding_counts"].get("raw_msgpack", 0) >= 1
+
+    def test_no_trailing_newline_with_columnar_mode(self, tmp_path):
+        lines = [f"INFO seq={i}".encode() for i in range(1, 200)]
+        files = {"nonl.log": b"\n".join(lines)}
+        corpus_dir = make_corpus(tmp_path, files)
+        archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["final_selected_mode"] == "corpus_template_columnar_v1"
+        out_dir = tmp_path / "out"
+        decompress_corpus_template(archive, out_dir)
+        assert (out_dir / "nonl.log").read_bytes() == files["nonl.log"]
+
+    def test_mixed_raw_and_templated_lines(self, tmp_path):
+        files = {
+            "mixed.log": (
+                b"INFO seq=1\n"
+                b"RAW ONLY LINE A\n"
+                b"INFO seq=2\n"
+                b"RAW ONLY LINE B\n"
+            )
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        archive, _ = compress_corpus_template_with_metrics(corpus_dir)
+        out_dir = tmp_path / "out"
+        decompress_corpus_template(archive, out_dir)
+        assert (out_dir / "mixed.log").read_bytes() == files["mixed.log"]
+
+    def test_binary_file_fallback_with_columnar_archive(self, tmp_path):
+        files = {
+            "structured.log": b"INFO seq=1\nINFO seq=2\n" * 60,
+            "data.bin": bytes(range(256)) * 2,
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        out_dir = tmp_path / "out"
+        decompress_corpus_template(archive, out_dir)
+        assert metrics["binary_fallback_files"] >= 1
+        for rel, data in files.items():
+            assert (out_dir / rel).read_bytes() == data
 
 
 # ---------------------------------------------------------------------------
@@ -414,4 +580,3 @@ class TestRawFallback:
         # If fallback fired, archive must be no larger than TAR+ZSTD * threshold.
         if metrics["chose_raw_fallback"]:
             assert len(archive) <= metrics["tarzstd_size"] * _CORPUS_FALLBACK_THRESHOLD + 200
-

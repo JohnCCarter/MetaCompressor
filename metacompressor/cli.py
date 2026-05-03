@@ -241,6 +241,8 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     mck, metrics = compress_corpus_template_with_metrics(input_dir)
     mck_size = len(mck)
     mck_timing = metrics["timing"]
+    row_mode_size = metrics["row_mode_size"]
+    columnar_size = metrics["columnar_size"]
 
     # --- Zstandard per-file (level 3) ---
     cctx = zstd.ZstdCompressor(level=3)
@@ -271,8 +273,14 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
         f"  time {mc_time*1000:.1f} ms"
     )
     print(
-        f"MC corpus-template   : {mck_size:>12,} bytes  ratio {ratio(mck_size)}"
+        f"MC template final    : {mck_size:>12,} bytes  ratio {ratio(mck_size)}"
         f"  time {mck_timing['total_s']*1000:.1f} ms"
+    )
+    print(
+        f"MC template row      : {row_mode_size:>12,} bytes  ratio {ratio(row_mode_size)}"
+    )
+    print(
+        f"MC template columnar : {columnar_size:>12,} bytes  ratio {ratio(columnar_size)}"
     )
     print(
         f"ZSTD per-file        : {zstd_total:>12,} bytes  ratio {ratio(zstd_total)}"
@@ -288,7 +296,7 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     )
 
     print()
-    print("--- Delta (MC corpus-template vs baselines) ---")
+    print("--- Delta (MC template final vs baselines) ---")
     print(format_delta(mck_size, tar_zstd, "TAR+ZSTD"))
     print(format_delta(mck_size, zstd_total, "ZSTD per-file"))
 
@@ -309,6 +317,15 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     print(f"  Raw fallback lines  : {metrics['raw_fallback_lines']:,}")
     print(f"  Binary fallback files:{metrics['binary_fallback_files']}")
     print(f"  Avg vars/tpl line   : {metrics['avg_vars_per_tpl_line']:.2f}")
+    print(f"  Columnar enabled    : {metrics['columnar_enabled']}")
+    print(f"  Columnar templates  : {metrics['num_columnar_templates']:,}")
+    print(f"  Encoded columns     : {metrics['num_encoded_columns']:,}")
+    print(f"  Raw column fallback : {metrics['raw_column_fallback_count']:,}")
+    print(f"  Column encodings    : {metrics['column_encoding_counts']}")
+    print(f"  Columnar size       : {columnar_size:,}")
+    print(f"  Row mode size       : {row_mode_size:,}")
+    print(f"  Columnar vs row     : {metrics['columnar_savings_vs_row']:,} bytes")
+    print(f"  Final selected mode : {metrics['final_selected_mode']}")
 
 
 def build_parser() -> argparse.ArgumentParser:
