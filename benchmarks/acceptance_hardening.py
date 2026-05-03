@@ -14,30 +14,12 @@ from typing import Any, Dict, List, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from benchmarks.production_validation import (  # noqa: E402
-    DatasetSpec,
-    ValidationError,
-    _available_mb,
-    _build_dataset,
-    _delta_pct,
-    _fmt_bytes,
-    _fmt_pct,
-    _json_dumps,
-    _measure_dataset,
-    _mode_label,
-    _mode_verdict,
-    _generate_app_service_logs,
-    _generate_high_cardinality_logs,
-    _generate_many_small_files,
-    _generate_mixed_microservice_logs,
-    _generate_ndjson_logs,
-    _generate_nginx_logs,
-    _generate_noisy_logs,
-)
+from benchmarks import production_validation as pv  # noqa: E402
 
 _RESULTS_DIR = REPO_ROOT / "results"
 _MARKDOWN_PATH = _RESULTS_DIR / "metacompressor_acceptance_hardening.md"
 _JSON_PATH = _RESULTS_DIR / "metacompressor_acceptance_hardening.json"
+_MIN_STRONG_WIN_NUMERATOR = 2
 
 _EDGE_DATASET_NAMES = (
     "app_service_logs",
