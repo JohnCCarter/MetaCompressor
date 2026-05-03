@@ -714,7 +714,7 @@ class TestLargeStructuredLogs:
         if compress_s > 30.0:
             _H_SLOW.append(f"H-100mb_structured: compress {compress_s:.1f}s")
         if peak_mb > 400:
-            _H_MEMORY_SPIKES.append(f"H-100mb_structured: {peak_mb:.0f} MB")
+            _H_MEMORY_SPIKES.append(f"H-100mb_structured: {peak_mb:.1f} MB")
 
         notes = (
             f"100 MB structured log; tpl_reuse={metrics['template_reuse_rate']:.2f}; "
@@ -1405,9 +1405,9 @@ class TestHardeningRegressionGate:
 
 
 class TestDeterminismLarge:
-    def test_determinism_50mb(self, tmp_path):
-        """Identical 50 MB corpora must produce identical byte-for-byte archives."""
-        size_mb = 10  # Use 10 MB for determinism test (still validates the property)
+    def test_determinism_10mb(self, tmp_path):
+        """Identical 10 MB corpora must produce identical byte-for-byte archives."""
+        size_mb = 10
         dir1 = tmp_path / "run1"
         dir2 = tmp_path / "run2"
         corpus1 = gen_structured_logs(dir1, size_mb)
@@ -1423,7 +1423,7 @@ class TestDeterminismLarge:
         )
 
     def test_determinism_many_files(self, tmp_path):
-        """2 000 files: two independent compressions must be byte-for-byte identical."""
+        """200 files: two independent compressions must be byte-for-byte identical."""
         dir1 = tmp_path / "run1"
         dir2 = tmp_path / "run2"
         corpus1 = gen_many_small_files(dir1, n=200)
