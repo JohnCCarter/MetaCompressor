@@ -1108,6 +1108,10 @@ def _build_markdown_report(
         "",
         "**Final verdict:** `%s`" % final_verdict,
         "",
+        "**Correctness / determinism:** all MC row, columnar, and final archives "
+        "were decompressed and byte-compared against the source corpus; repeated "
+        "compressions matched byte-for-byte.",
+        "",
         "| Dataset | Type | Raw | TAR+ZSTD | ZSTD/file | MC final | MC mode | Delta vs TAR+ZSTD | Compress s | Decompress s | Peak MB | Verdict |",
         "|---|---|---:|---:|---:|---:|---|---:|---:|---:|---:|---|",
     ]
@@ -1154,13 +1158,13 @@ def _build_markdown_report(
         result
         for result in dataset_results
         if result["mc_summary"]["delta_vs_tar_zstd_pct"] is not None
-        and result["mc_summary"]["delta_vs_tar_zstd_pct"] < 0.0
+        and result["mc_summary"]["delta_vs_tar_zstd_pct"] <= -1.0
     ]
     losses = [
         result
         for result in dataset_results
         if result["mc_summary"]["delta_vs_tar_zstd_pct"] is not None
-        and result["mc_summary"]["delta_vs_tar_zstd_pct"] > 0.0
+        and result["mc_summary"]["delta_vs_tar_zstd_pct"] >= 1.0
     ]
     fallback_datasets = [
         result["name"]

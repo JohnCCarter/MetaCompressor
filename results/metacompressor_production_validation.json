@@ -1,0 +1,1653 @@
+{
+  "available_memory_mb_at_start": 7180,
+  "brotli_available": false,
+  "compression_levels": {
+    "brotli": null,
+    "gzip": 6,
+    "zstd": 3
+  },
+  "correctness_passed": true,
+  "datasets": [
+    {
+      "dataset_type": "app/service logs",
+      "mc_summary": {
+        "binary_fallback_files": 10,
+        "column_count": 0,
+        "column_encoding_counts": {},
+        "delta_vs_tar_zstd_pct": -0.09027425735261957,
+        "delta_vs_zstd_per_file_pct": -0.050319870108024536,
+        "fallback_triggered": false,
+        "raw_fallback_files": 10,
+        "raw_fallback_lines": 47755,
+        "reduction_vs_raw_pct": 77.85557028446321,
+        "selected_mode": "corpus_template_columnar_v1",
+        "template_count": 47,
+        "template_reuse_rate": 0.0,
+        "verdict": "win"
+      },
+      "methods": {
+        "brotli": null,
+        "gzip": {
+          "compress_s": 0.20736135500010278,
+          "decompress_s": 0.034636088000297605,
+          "peak_mem_mb": 2.4209346771240234,
+          "size": 2807119
+        },
+        "mc_columnar_template": {
+          "compress_s": 1.8832228339997528,
+          "decompress_s": 0.012255096999979287,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 10,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": null,
+            "columnar_size": 2786760,
+            "compressed_size": 2786760,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 10,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 10,
+            "num_lines": 49593,
+            "num_shared_templates": 47,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 47755,
+            "row_mode_size": null,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.20167344699984824,
+              "extract_s": 1.4841536880003332,
+              "serialize_s": 0.03848740499961423,
+              "tokenize_s": 1.481031852000342,
+              "total_s": 1.687766738999926,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 117.3486909866333,
+          "size": 2786760
+        },
+        "mc_final_selected": {
+          "compress_s": 2.3397153000005346,
+          "decompress_s": 0.012595891999808373,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 10,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": 3479,
+            "columnar_size": 2786760,
+            "compressed_size": 2786760,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 10,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 10,
+            "num_lines": 49593,
+            "num_shared_templates": 47,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 47755,
+            "row_mode_size": 2790239,
+            "tarzstd_size": 2786167,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.5071511240003019,
+              "extract_s": 2.0093322130005618,
+              "serialize_s": 0.3405135810007778,
+              "tokenize_s": 1.4965594080003939,
+              "total_s": 2.055011793000631,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 125.07562637329102,
+          "size": 2786760
+        },
+        "mc_row_template": {
+          "compress_s": 2.0004696609994426,
+          "decompress_s": 0.012896838999949978,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 10,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": false,
+            "columnar_savings_vs_row": null,
+            "columnar_size": null,
+            "compressed_size": 2790239,
+            "final_selected_mode": "corpus_template_row_v1",
+            "low_structure_fallback_files": 10,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 10,
+            "num_lines": 49593,
+            "num_shared_templates": 47,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 47755,
+            "row_mode_size": 2790239,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.2925523569992947,
+              "extract_s": 1.514053978999982,
+              "serialize_s": 0.29226003299936565,
+              "tokenize_s": 1.51128585799961,
+              "total_s": 1.807879571999365,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 85.85666847229004,
+          "size": 2790239
+        },
+        "tar_zstd": {
+          "compress_s": 0.06289753100008966,
+          "decompress_s": 0.019554823000362376,
+          "peak_mem_mb": 2.4220752716064453,
+          "size": 2789278
+        },
+        "zstd_per_file": {
+          "compress_s": 0.04729624599985982,
+          "decompress_s": 0.00722922099976131,
+          "peak_mem_mb": 3.6197509765625,
+          "size": 2788163
+        }
+      },
+      "name": "app_service_logs",
+      "raw_size": 12584474,
+      "realism": "semi-realistic",
+      "structured": true
+    },
+    {
+      "dataset_type": "JSON/NDJSON logs",
+      "mc_summary": {
+        "binary_fallback_files": 8,
+        "column_count": 0,
+        "column_encoding_counts": {},
+        "delta_vs_tar_zstd_pct": 0.0008710336665400039,
+        "delta_vs_zstd_per_file_pct": 0.7610733577150831,
+        "fallback_triggered": false,
+        "raw_fallback_files": 8,
+        "raw_fallback_lines": 49014,
+        "reduction_vs_raw_pct": 81.2328922192444,
+        "selected_mode": "corpus_template_columnar_v1",
+        "template_count": 78,
+        "template_reuse_rate": 0.0,
+        "verdict": "acceptable"
+      },
+      "methods": {
+        "brotli": null,
+        "gzip": {
+          "compress_s": 0.1925351320005575,
+          "decompress_s": 0.03464586800055258,
+          "peak_mem_mb": 3.5184059143066406,
+          "size": 2601010
+        },
+        "mc_columnar_template": {
+          "compress_s": 2.283032005999303,
+          "decompress_s": 0.013258844999654684,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 8,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": null,
+            "columnar_size": 2755371,
+            "compressed_size": 2755371,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 8,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 8,
+            "num_lines": 49178,
+            "num_shared_templates": 78,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 49014,
+            "row_mode_size": null,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.21725801000047795,
+              "extract_s": 1.8277955590001511,
+              "serialize_s": 0.038088241999503225,
+              "tokenize_s": 1.8243950260002748,
+              "total_s": 2.048332322000533,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 138.87857341766357,
+          "size": 2755371
+        },
+        "mc_final_selected": {
+          "compress_s": 2.6427693619998536,
+          "decompress_s": 0.01316470300025685,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 8,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": 981,
+            "columnar_size": 2755371,
+            "compressed_size": 2755371,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 8,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 8,
+            "num_lines": 49178,
+            "num_shared_templates": 78,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 49014,
+            "row_mode_size": 2756352,
+            "tarzstd_size": 2753430,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.5235760030000165,
+              "extract_s": 2.2900859159999527,
+              "serialize_s": 0.3486873640003978,
+              "tokenize_s": 1.7582791630002248,
+              "total_s": 2.334709605000171,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 147.1580629348755,
+          "size": 2755371
+        },
+        "mc_row_template": {
+          "compress_s": 2.313669766000203,
+          "decompress_s": 0.013187415999709629,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 8,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": false,
+            "columnar_savings_vs_row": null,
+            "columnar_size": null,
+            "compressed_size": 2756352,
+            "final_selected_mode": "corpus_template_row_v1",
+            "low_structure_fallback_files": 8,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 8,
+            "num_lines": 49178,
+            "num_shared_templates": 78,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 49014,
+            "row_mode_size": 2756352,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.2696172550004121,
+              "extract_s": 1.8066561559999172,
+              "serialize_s": 0.2695246479997877,
+              "tokenize_s": 1.802679604000332,
+              "total_s": 2.078571089000434,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 96.4967269897461,
+          "size": 2756352
+        },
+        "tar_zstd": {
+          "compress_s": 0.06099745600022288,
+          "decompress_s": 0.022878614000546804,
+          "peak_mem_mb": 3.518566131591797,
+          "size": 2755347
+        },
+        "zstd_per_file": {
+          "compress_s": 0.0427920100000847,
+          "decompress_s": 0.007166461999986495,
+          "peak_mem_mb": 5.271853446960449,
+          "size": 2734559
+        }
+      },
+      "name": "json_ndjson_logs",
+      "raw_size": 14681916,
+      "realism": "semi-realistic",
+      "structured": true
+    },
+    {
+      "dataset_type": "nginx/access logs",
+      "mc_summary": {
+        "binary_fallback_files": 0,
+        "column_count": 62201,
+        "column_encoding_counts": {
+          "dictionary": 32,
+          "raw_msgpack": 22398,
+          "rle": 11817,
+          "varint": 27954
+        },
+        "delta_vs_tar_zstd_pct": 0.6219958381004985,
+        "delta_vs_zstd_per_file_pct": 0.4823694903731411,
+        "fallback_triggered": true,
+        "raw_fallback_files": 0,
+        "raw_fallback_lines": 69952,
+        "reduction_vs_raw_pct": 83.83114528218243,
+        "selected_mode": "raw_tar_zstd",
+        "template_count": 5387,
+        "template_reuse_rate": 0.21389881554401816,
+        "verdict": "acceptable"
+      },
+      "methods": {
+        "brotli": null,
+        "gzip": {
+          "compress_s": 0.15725899999961257,
+          "decompress_s": 0.030401081000491104,
+          "peak_mem_mb": 4.682520866394043,
+          "size": 2092649
+        },
+        "mc_columnar_template": {
+          "compress_s": 6.86007834999964,
+          "decompress_s": 0.191966128999411,
+          "metrics": {
+            "avg_vars_per_tpl_line": 11.390038877797625,
+            "binary_fallback_files": 0,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {
+              "dictionary": 32,
+              "raw_msgpack": 22398,
+              "rle": 11817,
+              "varint": 27954
+            },
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": null,
+            "columnar_size": 2674544,
+            "compressed_size": 2674544,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 0,
+            "num_columnar_templates": 5387,
+            "num_encoded_columns": 39803,
+            "num_files": 6,
+            "num_lines": 88986,
+            "num_shared_templates": 5387,
+            "raw_column_fallback_count": 22398,
+            "raw_fallback_lines": 69952,
+            "row_mode_size": null,
+            "tarzstd_size": null,
+            "template_reuse_count": 19034,
+            "template_reuse_rate": 0.21389881554401816,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 3.842839801000082,
+              "extract_s": 2.451878900000338,
+              "serialize_s": 2.681442894000611,
+              "tokenize_s": 2.4221090270002605,
+              "total_s": 6.464591874000689,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 213.7505922317505,
+          "size": 2674544
+        },
+        "mc_final_selected": {
+          "compress_s": 7.696946500999729,
+          "decompress_s": 0.014175319000059972,
+          "metrics": {
+            "avg_vars_per_tpl_line": 11.390038877797625,
+            "binary_fallback_files": 0,
+            "chose_raw_fallback": true,
+            "column_encoding_counts": {
+              "dictionary": 32,
+              "raw_msgpack": 22398,
+              "rle": 11817,
+              "varint": 27954
+            },
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": -33648,
+            "columnar_size": 2674544,
+            "compressed_size": 2373692,
+            "final_selected_mode": "raw_tar_zstd",
+            "low_structure_fallback_files": 0,
+            "num_columnar_templates": 5387,
+            "num_encoded_columns": 39803,
+            "num_files": 6,
+            "num_lines": 88986,
+            "num_shared_templates": 5387,
+            "raw_column_fallback_count": 22398,
+            "raw_fallback_lines": 69952,
+            "row_mode_size": 2640896,
+            "tarzstd_size": 2373591,
+            "template_reuse_count": 19034,
+            "template_reuse_rate": 0.21389881554401816,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 4.45934966599998,
+              "extract_s": 7.106794336999883,
+              "serialize_s": 3.405773065000176,
+              "tokenize_s": 2.4475264980001157,
+              "total_s": 7.150748660999852,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 223.47022438049316,
+          "size": 2373692
+        },
+        "mc_row_template": {
+          "compress_s": 3.6047978010001316,
+          "decompress_s": 0.09134729400011565,
+          "metrics": {
+            "avg_vars_per_tpl_line": 11.390038877797625,
+            "binary_fallback_files": 0,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": false,
+            "columnar_savings_vs_row": null,
+            "columnar_size": null,
+            "compressed_size": 2640896,
+            "final_selected_mode": "corpus_template_row_v1",
+            "low_structure_fallback_files": 0,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 6,
+            "num_lines": 88986,
+            "num_shared_templates": 5387,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 69952,
+            "row_mode_size": 2640896,
+            "tarzstd_size": null,
+            "template_reuse_count": 19034,
+            "template_reuse_rate": 0.21389881554401816,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.5953268099992783,
+              "extract_s": 2.5450371189999714,
+              "serialize_s": 0.5944151499998043,
+              "tokenize_s": 2.5139542280003297,
+              "total_s": 3.146565177999946,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 142.8648920059204,
+          "size": 2640896
+        },
+        "tar_zstd": {
+          "compress_s": 0.054323639000358526,
+          "decompress_s": 0.021772931999294087,
+          "peak_mem_mb": 4.682665824890137,
+          "size": 2359019
+        },
+        "zstd_per_file": {
+          "compress_s": 0.03548957299972244,
+          "decompress_s": 0.007295352999790339,
+          "peak_mem_mb": 7.024224281311035,
+          "size": 2362297
+        }
+      },
+      "name": "nginx_access_logs",
+      "raw_size": 14680644,
+      "realism": "semi-realistic",
+      "structured": true
+    },
+    {
+      "dataset_type": "mixed microservice logs",
+      "mc_summary": {
+        "binary_fallback_files": 12,
+        "column_count": 9133,
+        "column_encoding_counts": {
+          "delta_varint": 12,
+          "dictionary": 3,
+          "raw_msgpack": 3283,
+          "rle": 1692,
+          "varint": 4143
+        },
+        "delta_vs_tar_zstd_pct": -2.05868694978362,
+        "delta_vs_zstd_per_file_pct": -3.557812997835806,
+        "fallback_triggered": false,
+        "raw_fallback_files": 12,
+        "raw_fallback_lines": 73577,
+        "reduction_vs_raw_pct": 80.21500526392425,
+        "selected_mode": "corpus_template_columnar_v1",
+        "template_count": 861,
+        "template_reuse_rate": 0.21888443310244257,
+        "verdict": "win"
+      },
+      "methods": {
+        "brotli": null,
+        "gzip": {
+          "compress_s": 0.31205234000026394,
+          "decompress_s": 0.05587118699986604,
+          "peak_mem_mb": 3.4027700424194336,
+          "size": 4247368
+        },
+        "mc_columnar_template": {
+          "compress_s": 4.892754368000169,
+          "decompress_s": 0.08581461099947774,
+          "metrics": {
+            "avg_vars_per_tpl_line": 4.7980394023032265,
+            "binary_fallback_files": 12,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {
+              "delta_varint": 12,
+              "dictionary": 3,
+              "raw_msgpack": 3283,
+              "rle": 1692,
+              "varint": 4143
+            },
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": null,
+            "columnar_size": 4201365,
+            "compressed_size": 4201365,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 12,
+            "num_columnar_templates": 811,
+            "num_encoded_columns": 5850,
+            "num_files": 15,
+            "num_lines": 96005,
+            "num_shared_templates": 861,
+            "raw_column_fallback_count": 3283,
+            "raw_fallback_lines": 73577,
+            "row_mode_size": null,
+            "tarzstd_size": null,
+            "template_reuse_count": 21014,
+            "template_reuse_rate": 0.21888443310244257,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 1.6735867830002462,
+              "extract_s": 2.792505471000368,
+              "serialize_s": 0.9968123580001702,
+              "tokenize_s": 2.7820549449997998,
+              "total_s": 4.502297158000147,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 211.37578296661377,
+          "size": 4201365
+        },
+        "mc_final_selected": {
+          "compress_s": 5.657983353999953,
+          "decompress_s": 0.08484116299950983,
+          "metrics": {
+            "avg_vars_per_tpl_line": 4.7980394023032265,
+            "binary_fallback_files": 12,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {
+              "delta_varint": 12,
+              "dictionary": 3,
+              "raw_msgpack": 3283,
+              "rle": 1692,
+              "varint": 4143
+            },
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": 66063,
+            "columnar_size": 4201365,
+            "compressed_size": 4201365,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 12,
+            "num_columnar_templates": 811,
+            "num_encoded_columns": 5850,
+            "num_files": 15,
+            "num_lines": 96005,
+            "num_shared_templates": 861,
+            "raw_column_fallback_count": 3283,
+            "raw_fallback_lines": 73577,
+            "row_mode_size": 4267428,
+            "tarzstd_size": 4286449,
+            "template_reuse_count": 21014,
+            "template_reuse_rate": 0.21888443310244257,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 2.191691738999907,
+              "extract_s": 5.050909182999931,
+              "serialize_s": 1.5051389080008448,
+              "tokenize_s": 2.8094655799995962,
+              "total_s": 5.123903016999975,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 222.07477951049805,
+          "size": 4201365
+        },
+        "mc_row_template": {
+          "compress_s": 3.7840564810003343,
+          "decompress_s": 0.05145927600005962,
+          "metrics": {
+            "avg_vars_per_tpl_line": 4.7980394023032265,
+            "binary_fallback_files": 12,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": false,
+            "columnar_savings_vs_row": null,
+            "columnar_size": null,
+            "compressed_size": 4267428,
+            "final_selected_mode": "corpus_template_row_v1",
+            "low_structure_fallback_files": 12,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 15,
+            "num_lines": 96005,
+            "num_shared_templates": 861,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 73577,
+            "row_mode_size": 4267428,
+            "tarzstd_size": null,
+            "template_reuse_count": 21014,
+            "template_reuse_rate": 0.21888443310244257,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.5269494719996146,
+              "extract_s": 2.813800894000451,
+              "serialize_s": 0.5268235450002976,
+              "tokenize_s": 2.805939140999726,
+              "total_s": 3.3456509829993593,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 148.1135654449463,
+          "size": 4267428
+        },
+        "tar_zstd": {
+          "compress_s": 0.09498014200016769,
+          "decompress_s": 0.03122602699932031,
+          "peak_mem_mb": 3.402785301208496,
+          "size": 4289676
+        },
+        "zstd_per_file": {
+          "compress_s": 0.06693286300014734,
+          "decompress_s": 0.011800231000052008,
+          "peak_mem_mb": 5.653504371643066,
+          "size": 4356356
+        }
+      },
+      "name": "mixed_microservice_logs",
+      "raw_size": 21235108,
+      "realism": "semi-realistic",
+      "structured": true
+    },
+    {
+      "dataset_type": "high-cardinality logs",
+      "mc_summary": {
+        "binary_fallback_files": 6,
+        "column_count": 0,
+        "column_encoding_counts": {},
+        "delta_vs_tar_zstd_pct": -0.16612411898220047,
+        "delta_vs_zstd_per_file_pct": 0.4004241299249191,
+        "fallback_triggered": false,
+        "raw_fallback_files": 6,
+        "raw_fallback_lines": 42282,
+        "reduction_vs_raw_pct": 64.29524269459588,
+        "selected_mode": "corpus_template_columnar_v1",
+        "template_count": 1,
+        "template_reuse_rate": 0.0,
+        "verdict": "win"
+      },
+      "methods": {
+        "brotli": null,
+        "gzip": {
+          "compress_s": 0.25159842499942897,
+          "decompress_s": 0.041555554999831656,
+          "peak_mem_mb": 3.3491859436035156,
+          "size": 3959379
+        },
+        "mc_columnar_template": {
+          "compress_s": 2.5799920019999263,
+          "decompress_s": 0.011368823000339034,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 6,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": null,
+            "columnar_size": 3743978,
+            "compressed_size": 3743978,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 6,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 6,
+            "num_lines": 42288,
+            "num_shared_templates": 1,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 42282,
+            "row_mode_size": null,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.19925421700008883,
+              "extract_s": 2.075906326000222,
+              "serialize_s": 0.04488508699978411,
+              "tokenize_s": 2.0718743140005245,
+              "total_s": 2.2773713280002994,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 141.0702714920044,
+          "size": 3743978
+        },
+        "mc_final_selected": {
+          "compress_s": 2.9982388309999806,
+          "decompress_s": 0.011696878999828186,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 6,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": 6690,
+            "columnar_size": 3743978,
+            "compressed_size": 3743978,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 6,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 6,
+            "num_lines": 42288,
+            "num_shared_templates": 1,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 42282,
+            "row_mode_size": 3750668,
+            "tarzstd_size": 3744217,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.5030858240006637,
+              "extract_s": 2.5437995559996125,
+              "serialize_s": 0.2910179450000214,
+              "tokenize_s": 2.0325512979998166,
+              "total_s": 2.5939408700005515,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 149.2868766784668,
+          "size": 3743978
+        },
+        "mc_row_template": {
+          "compress_s": 2.666095304999544,
+          "decompress_s": 0.011714142000528227,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 6,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": false,
+            "columnar_savings_vs_row": null,
+            "columnar_size": null,
+            "compressed_size": 3750668,
+            "final_selected_mode": "corpus_template_row_v1",
+            "low_structure_fallback_files": 6,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 6,
+            "num_lines": 42288,
+            "num_shared_templates": 1,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 42282,
+            "row_mode_size": 3750668,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.3170894049999333,
+              "extract_s": 2.0360361479997664,
+              "serialize_s": 0.3169931419997738,
+              "tokenize_s": 2.0313551640001606,
+              "total_s": 2.3548783589994855,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 118.0435848236084,
+          "size": 3750668
+        },
+        "tar_zstd": {
+          "compress_s": 0.06741792399952828,
+          "decompress_s": 0.016811272000268218,
+          "peak_mem_mb": 3.3492698669433594,
+          "size": 3750208
+        },
+        "zstd_per_file": {
+          "compress_s": 0.05084420399998635,
+          "decompress_s": 0.007009472999925492,
+          "peak_mem_mb": 5.018930435180664,
+          "size": 3729046
+        }
+      },
+      "name": "high_cardinality_logs",
+      "raw_size": 10485936,
+      "realism": "semi-realistic",
+      "structured": true
+    },
+    {
+      "dataset_type": "noisy/low-structure logs",
+      "mc_summary": {
+        "binary_fallback_files": 0,
+        "column_count": 18128,
+        "column_encoding_counts": {
+          "delta_varint": 7,
+          "dictionary": 32,
+          "raw_msgpack": 5409,
+          "rle": 1482,
+          "varint": 11198
+        },
+        "delta_vs_tar_zstd_pct": 9.237444153894863,
+        "delta_vs_zstd_per_file_pct": 9.028921339714262,
+        "fallback_triggered": false,
+        "raw_fallback_files": 0,
+        "raw_fallback_lines": 43370,
+        "reduction_vs_raw_pct": 90.12884677495238,
+        "selected_mode": "corpus_template_row_v1",
+        "template_count": 4924,
+        "template_reuse_rate": 0.7515865924347607,
+        "verdict": "acceptable"
+      },
+      "methods": {
+        "brotli": null,
+        "gzip": {
+          "compress_s": 0.06949939399964933,
+          "decompress_s": 0.016432745999736653,
+          "peak_mem_mb": 3.0157642364501953,
+          "size": 831857
+        },
+        "mc_columnar_template": {
+          "compress_s": 5.446439981000367,
+          "decompress_s": 0.21381007000036334,
+          "metrics": {
+            "avg_vars_per_tpl_line": 1.3223566888689051,
+            "binary_fallback_files": 0,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {
+              "delta_varint": 7,
+              "dictionary": 32,
+              "raw_msgpack": 5409,
+              "rle": 1482,
+              "varint": 11198
+            },
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": null,
+            "columnar_size": 1010977,
+            "compressed_size": 1010977,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 0,
+            "num_columnar_templates": 4924,
+            "num_encoded_columns": 12719,
+            "num_files": 6,
+            "num_lines": 174588,
+            "num_shared_templates": 4924,
+            "raw_column_fallback_count": 5409,
+            "raw_fallback_lines": 43370,
+            "row_mode_size": null,
+            "tarzstd_size": null,
+            "template_reuse_count": 131218,
+            "template_reuse_rate": 0.7515865924347607,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 3.7838181310007712,
+              "extract_s": 1.2414458270004616,
+              "serialize_s": 1.8858320769995771,
+              "tokenize_s": 1.2209049149996645,
+              "total_s": 5.266790509000202,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 98.66204357147217,
+          "size": 1010977
+        },
+        "mc_final_selected": {
+          "compress_s": 6.5220384929998545,
+          "decompress_s": 0.13486603900037153,
+          "metrics": {
+            "avg_vars_per_tpl_line": 1.3223566888689051,
+            "binary_fallback_files": 0,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {
+              "delta_varint": 7,
+              "dictionary": 32,
+              "raw_msgpack": 5409,
+              "rle": 1482,
+              "varint": 11198
+            },
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": -79411,
+            "columnar_size": 1010977,
+            "compressed_size": 931566,
+            "final_selected_mode": "corpus_template_row_v1",
+            "low_structure_fallback_files": 0,
+            "num_columnar_templates": 4924,
+            "num_encoded_columns": 12719,
+            "num_files": 6,
+            "num_lines": 174588,
+            "num_shared_templates": 4924,
+            "raw_column_fallback_count": 5409,
+            "raw_fallback_lines": 43370,
+            "row_mode_size": 931566,
+            "tarzstd_size": 851682,
+            "template_reuse_count": 131218,
+            "template_reuse_rate": 0.7515865924347607,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 4.735088201000508,
+              "extract_s": 6.286689295000542,
+              "serialize_s": 2.8542738659998577,
+              "tokenize_s": 1.27734711300036,
+              "total_s": 6.309131852000064,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 107.74253368377686,
+          "size": 931566
+        },
+        "mc_row_template": {
+          "compress_s": 2.381235328999537,
+          "decompress_s": 0.1283549279996805,
+          "metrics": {
+            "avg_vars_per_tpl_line": 1.3223566888689051,
+            "binary_fallback_files": 0,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": false,
+            "columnar_savings_vs_row": null,
+            "columnar_size": null,
+            "compressed_size": 931566,
+            "final_selected_mode": "corpus_template_row_v1",
+            "low_structure_fallback_files": 0,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 6,
+            "num_lines": 174588,
+            "num_shared_templates": 4924,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 43370,
+            "row_mode_size": 931566,
+            "tarzstd_size": null,
+            "template_reuse_count": 131218,
+            "template_reuse_rate": 0.7515865924347607,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.9433205929999531,
+              "extract_s": 1.2414082000004782,
+              "serialize_s": 0.9426267649996589,
+              "tokenize_s": 1.221602958999938,
+              "total_s": 2.194973962000404,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 58.28406810760498,
+          "size": 931566
+        },
+        "tar_zstd": {
+          "compress_s": 0.027662902999509242,
+          "decompress_s": 0.011506296999868937,
+          "peak_mem_mb": 3.016092300415039,
+          "size": 852790
+        },
+        "zstd_per_file": {
+          "compress_s": 0.016882492000149796,
+          "decompress_s": 0.0024347770004169433,
+          "peak_mem_mb": 4.51754093170166,
+          "size": 854421
+        }
+      },
+      "name": "noisy_low_structure_logs",
+      "raw_size": 9437256,
+      "realism": "semi-realistic",
+      "structured": false
+    },
+    {
+      "dataset_type": "binary/compressed mixed corpus",
+      "mc_summary": {
+        "binary_fallback_files": 11,
+        "column_count": 0,
+        "column_encoding_counts": {},
+        "delta_vs_tar_zstd_pct": -0.012002974970483481,
+        "delta_vs_zstd_per_file_pct": 0.12967570258826605,
+        "fallback_triggered": false,
+        "raw_fallback_files": 6,
+        "raw_fallback_lines": 45863,
+        "reduction_vs_raw_pct": 37.852245217724956,
+        "selected_mode": "corpus_template_columnar_v1",
+        "template_count": 41,
+        "template_reuse_rate": 0.0,
+        "verdict": "win"
+      },
+      "methods": {
+        "brotli": null,
+        "gzip": {
+          "compress_s": 0.4733692270001484,
+          "decompress_s": 0.04976270899987867,
+          "peak_mem_mb": 10.019224166870117,
+          "size": 16250621
+        },
+        "mc_columnar_template": {
+          "compress_s": 1.9676396340000792,
+          "decompress_s": 0.019404814999688824,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 11,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": null,
+            "columnar_size": 16294004,
+            "compressed_size": 16294004,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 6,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 11,
+            "num_lines": 47094,
+            "num_shared_templates": 41,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 45863,
+            "row_mode_size": null,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.24275468599989836,
+              "extract_s": 1.512596628999745,
+              "serialize_s": 0.04922406300011062,
+              "tokenize_s": 1.5094564069995613,
+              "total_s": 1.7586107739998624,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 169.81188869476318,
+          "size": 16294004
+        },
+        "mc_final_selected": {
+          "compress_s": 2.3987885450005706,
+          "decompress_s": 0.036389816000337305,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 11,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": 2946,
+            "columnar_size": 16294004,
+            "compressed_size": 16294004,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 6,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 11,
+            "num_lines": 47094,
+            "num_shared_templates": 41,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 45863,
+            "row_mode_size": 16296950,
+            "tarzstd_size": 16297224,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.548943066000902,
+              "extract_s": 2.0548573920004856,
+              "serialize_s": 0.3779835759996786,
+              "tokenize_s": 1.4963451309995435,
+              "total_s": 2.1149398759998803,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 191.5223846435547,
+          "size": 16294004
+        },
+        "mc_row_template": {
+          "compress_s": 2.0489849650002725,
+          "decompress_s": 0.022556230999725813,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 11,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": false,
+            "columnar_savings_vs_row": null,
+            "columnar_size": null,
+            "compressed_size": 16296950,
+            "final_selected_mode": "corpus_template_row_v1",
+            "low_structure_fallback_files": 6,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 11,
+            "num_lines": 47094,
+            "num_shared_templates": 41,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 45863,
+            "row_mode_size": 16296950,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.33409206099986477,
+              "extract_s": 1.497298354999657,
+              "serialize_s": 0.33398741700057144,
+              "tokenize_s": 1.4935394010008167,
+              "total_s": 1.8343111229996794,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 108.1689224243164,
+          "size": 16296950
+        },
+        "tar_zstd": {
+          "compress_s": 0.08299113799967017,
+          "decompress_s": 0.034327588000451215,
+          "peak_mem_mb": 10.01923942565918,
+          "size": 16295960
+        },
+        "zstd_per_file": {
+          "compress_s": 0.04936951600029715,
+          "decompress_s": 0.008653414000036719,
+          "peak_mem_mb": 16.04943084716797,
+          "size": 16272902
+        }
+      },
+      "name": "binary_compressed_mix",
+      "raw_size": 26218170,
+      "realism": "semi-realistic",
+      "structured": false
+    },
+    {
+      "dataset_type": "large corpus: 100MB+",
+      "mc_summary": {
+        "binary_fallback_files": 20,
+        "column_count": 0,
+        "column_encoding_counts": {},
+        "delta_vs_tar_zstd_pct": 0.024346224376252952,
+        "delta_vs_zstd_per_file_pct": 0.19472859515144514,
+        "fallback_triggered": false,
+        "raw_fallback_files": 20,
+        "raw_fallback_lines": 502072,
+        "reduction_vs_raw_pct": 77.78353815216848,
+        "selected_mode": "corpus_template_columnar_v1",
+        "template_count": 3855,
+        "template_reuse_rate": 0.0,
+        "verdict": "acceptable"
+      },
+      "methods": {
+        "brotli": null,
+        "gzip": {
+          "compress_s": 2.1734225270001843,
+          "decompress_s": 0.35433410800033016,
+          "peak_mem_mb": 12.831995964050293,
+          "size": 29891201
+        },
+        "mc_columnar_template": {
+          "compress_s": 23.550148145000094,
+          "decompress_s": 0.13001439799973014,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 20,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": null,
+            "columnar_size": 29818862,
+            "compressed_size": 29818862,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 20,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 20,
+            "num_lines": 528952,
+            "num_shared_templates": 3855,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 502072,
+            "row_mode_size": null,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 2.5987483819999397,
+              "extract_s": 18.3690126649999,
+              "serialize_s": 0.4158116440003141,
+              "tokenize_s": 18.326445442000477,
+              "total_s": 20.987269354999626,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 1261.1839265823364,
+          "size": 29818862
+        },
+        "mc_final_selected": {
+          "compress_s": 29.108034800000496,
+          "decompress_s": 0.12705637199997,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 20,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": 43436,
+            "columnar_size": 29818862,
+            "compressed_size": 29818862,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 20,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 20,
+            "num_lines": 528952,
+            "num_shared_templates": 3855,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 502072,
+            "row_mode_size": 29862298,
+            "tarzstd_size": 29769425,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 6.280870443999447,
+              "extract_s": 25.27969401199971,
+              "serialize_s": 4.087330663999637,
+              "tokenize_s": 18.932808087999547,
+              "total_s": 25.722368249000283,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 1323.172890663147,
+          "size": 29818862
+        },
+        "mc_row_template": {
+          "compress_s": 25.669859984999675,
+          "decompress_s": 0.1262184850002086,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 20,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": false,
+            "columnar_savings_vs_row": null,
+            "columnar_size": null,
+            "compressed_size": 29862298,
+            "final_selected_mode": "corpus_template_row_v1",
+            "low_structure_fallback_files": 20,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 20,
+            "num_lines": 528952,
+            "num_shared_templates": 3855,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 502072,
+            "row_mode_size": 29862298,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 4.399512486000276,
+              "extract_s": 18.783439697000176,
+              "serialize_s": 4.398566814000333,
+              "tokenize_s": 18.741229518999717,
+              "total_s": 23.19774762399993,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 868.811863899231,
+          "size": 29862298
+        },
+        "tar_zstd": {
+          "compress_s": 0.6135650449996319,
+          "decompress_s": 0.18805135000002338,
+          "peak_mem_mb": 12.832812309265137,
+          "size": 29811604
+        },
+        "zstd_per_file": {
+          "compress_s": 0.4138168979998227,
+          "decompress_s": 0.07010186600018642,
+          "peak_mem_mb": 19.268080711364746,
+          "size": 29760909
+        }
+      },
+      "name": "large_corpus_128mb",
+      "raw_size": 134219671,
+      "realism": "semi-realistic",
+      "structured": true
+    },
+    {
+      "dataset_type": "many-small-files corpus",
+      "mc_summary": {
+        "binary_fallback_files": 0,
+        "column_count": 19,
+        "column_encoding_counts": {
+          "dictionary": 3,
+          "raw_msgpack": 3,
+          "rle": 10,
+          "varint": 3
+        },
+        "delta_vs_tar_zstd_pct": -42.29287090558767,
+        "delta_vs_zstd_per_file_pct": -86.9076761671621,
+        "fallback_triggered": false,
+        "raw_fallback_files": 0,
+        "raw_fallback_lines": 0,
+        "reduction_vs_raw_pct": 87.40777816707543,
+        "selected_mode": "corpus_template_columnar_v1",
+        "template_count": 24,
+        "template_reuse_rate": 1.0,
+        "verdict": "strong win"
+      },
+      "methods": {
+        "brotli": null,
+        "gzip": {
+          "compress_s": 1.3067554750005002,
+          "decompress_s": 0.615423004999684,
+          "peak_mem_mb": 6.494869232177734,
+          "size": 154142
+        },
+        "mc_columnar_template": {
+          "compress_s": 1.3362929619997885,
+          "decompress_s": 0.22302863899949443,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.7058823529411765,
+            "binary_fallback_files": 0,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {
+              "dictionary": 3,
+              "raw_msgpack": 3,
+              "rle": 10,
+              "varint": 3
+            },
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": null,
+            "columnar_size": 62895,
+            "compressed_size": 62895,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 0,
+            "num_columnar_templates": 24,
+            "num_encoded_columns": 16,
+            "num_files": 5000,
+            "num_lines": 21250,
+            "num_shared_templates": 24,
+            "raw_column_fallback_count": 3,
+            "raw_fallback_lines": 0,
+            "row_mode_size": null,
+            "tarzstd_size": null,
+            "template_reuse_count": 21250,
+            "template_reuse_rate": 1.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.416783774000578,
+              "extract_s": 0.8833879510002589,
+              "serialize_s": 0.12468996400002652,
+              "tokenize_s": 0.7336089860000357,
+              "total_s": 1.310741522999706,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 11.14594554901123,
+          "size": 62895
+        },
+        "mc_final_selected": {
+          "compress_s": 3.4357905919996483,
+          "decompress_s": 0.2214491969998562,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.7058823529411765,
+            "binary_fallback_files": 0,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {
+              "dictionary": 3,
+              "raw_msgpack": 3,
+              "rle": 10,
+              "varint": 3
+            },
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": 16252,
+            "columnar_size": 62895,
+            "compressed_size": 62895,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 0,
+            "num_columnar_templates": 24,
+            "num_encoded_columns": 16,
+            "num_files": 5000,
+            "num_lines": 21250,
+            "num_shared_templates": 24,
+            "raw_column_fallback_count": 3,
+            "raw_fallback_lines": 0,
+            "row_mode_size": 79147,
+            "tarzstd_size": 163411,
+            "template_reuse_count": 21250,
+            "template_reuse_rate": 1.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.5961994130002495,
+              "extract_s": 1.3509353469999041,
+              "serialize_s": 0.3027676390011038,
+              "tokenize_s": 0.745268175000092,
+              "total_s": 3.3961790060002386,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 30.472464561462402,
+          "size": 62895
+        },
+        "mc_row_template": {
+          "compress_s": 1.0966127239998968,
+          "decompress_s": 0.2137570289996802,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.7058823529411765,
+            "binary_fallback_files": 0,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": false,
+            "columnar_savings_vs_row": null,
+            "columnar_size": null,
+            "compressed_size": 79147,
+            "final_selected_mode": "corpus_template_row_v1",
+            "low_structure_fallback_files": 0,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 5000,
+            "num_lines": 21250,
+            "num_shared_templates": 24,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 0,
+            "row_mode_size": 79147,
+            "tarzstd_size": null,
+            "template_reuse_count": 21250,
+            "template_reuse_rate": 1.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 0.1689233110000714,
+              "extract_s": 0.9015659960004996,
+              "serialize_s": 0.16881745600039721,
+              "tokenize_s": 0.7507546529996034,
+              "total_s": 1.070514092999474,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 7.748804092407227,
+          "size": 79147
+        },
+        "tar_zstd": {
+          "compress_s": 1.3140101790004337,
+          "decompress_s": 0.6157423909999125,
+          "peak_mem_mb": 6.497264862060547,
+          "size": 108990
+        },
+        "zstd_per_file": {
+          "compress_s": 1.1941569949995028,
+          "decompress_s": 0.11281231500015565,
+          "peak_mem_mb": 4.9313201904296875,
+          "size": 480396
+        }
+      },
+      "name": "many_small_files_5000",
+      "raw_size": 499475,
+      "realism": "semi-realistic",
+      "structured": true
+    },
+    {
+      "dataset_type": "very large corpus: 500MB+",
+      "mc_summary": {
+        "binary_fallback_files": 32,
+        "column_count": 0,
+        "column_encoding_counts": {},
+        "delta_vs_tar_zstd_pct": 0.2599856148124698,
+        "delta_vs_zstd_per_file_pct": 0.40933773881880436,
+        "fallback_triggered": false,
+        "raw_fallback_files": 32,
+        "raw_fallback_lines": 1956191,
+        "reduction_vs_raw_pct": 77.73031591545839,
+        "selected_mode": "corpus_template_columnar_v1",
+        "template_count": 34734,
+        "template_reuse_rate": 0.0,
+        "verdict": "acceptable"
+      },
+      "methods": {
+        "brotli": null,
+        "gzip": {
+          "compress_s": 11.929461524000544,
+          "decompress_s": 1.95351918400047,
+          "peak_mem_mb": 32.04770755767822,
+          "size": 119557261
+        },
+        "mc_columnar_template": {
+          "compress_s": 97.38877748499999,
+          "decompress_s": 0.5142093229997045,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 32,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": null,
+            "columnar_size": 119560478,
+            "compressed_size": 119560478,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 32,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 32,
+            "num_lines": 2116327,
+            "num_shared_templates": 34734,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 1956191,
+            "row_mode_size": null,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 11.156843869000113,
+              "extract_s": 75.77949083200019,
+              "serialize_s": 1.6839764799997283,
+              "tokenize_s": 75.53122159299983,
+              "total_s": 87.01108434900016,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 5266.298192024231,
+          "size": 119560478
+        },
+        "mc_final_selected": {
+          "compress_s": 122.96599188400069,
+          "decompress_s": 0.5212491700003739,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 32,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": true,
+            "columnar_savings_vs_row": 173432,
+            "columnar_size": 119560478,
+            "compressed_size": 119560478,
+            "final_selected_mode": "corpus_template_columnar_v1",
+            "low_structure_fallback_files": 32,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 32,
+            "num_lines": 2116327,
+            "num_shared_templates": 34734,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 1956191,
+            "row_mode_size": 119733910,
+            "tarzstd_size": 119080136,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 28.61942277200069,
+              "extract_s": 107.60176707899973,
+              "serialize_s": 19.38767974500024,
+              "tokenize_s": 78.66331558799993,
+              "total_s": 109.47051222899972,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 5493.699443817139,
+          "size": 119560478
+        },
+        "mc_row_template": {
+          "compress_s": 105.01614573500046,
+          "decompress_s": 0.5083562640002128,
+          "metrics": {
+            "avg_vars_per_tpl_line": 0.0,
+            "binary_fallback_files": 32,
+            "chose_raw_fallback": false,
+            "column_encoding_counts": {},
+            "columnar_enabled": false,
+            "columnar_savings_vs_row": null,
+            "columnar_size": null,
+            "compressed_size": 119733910,
+            "final_selected_mode": "corpus_template_row_v1",
+            "low_structure_fallback_files": 32,
+            "num_columnar_templates": 0,
+            "num_encoded_columns": 0,
+            "num_files": 32,
+            "num_lines": 2116327,
+            "num_shared_templates": 34734,
+            "raw_column_fallback_count": 0,
+            "raw_fallback_lines": 1956191,
+            "row_mode_size": 119733910,
+            "tarzstd_size": null,
+            "template_reuse_count": 0,
+            "template_reuse_rate": 0.0,
+            "timing": {
+              "count_s": 0.0,
+              "encode_s": 17.783106380999925,
+              "extract_s": 76.88080317000004,
+              "serialize_s": 17.774957143999927,
+              "tokenize_s": 76.6322900059995,
+              "total_s": 94.71589551800025,
+              "zstd_s": 0.0
+            }
+          },
+          "peak_mem_mb": 3415.93390750885,
+          "size": 119733910
+        },
+        "tar_zstd": {
+          "compress_s": 2.4904274889995577,
+          "decompress_s": 2.244047185999989,
+          "peak_mem_mb": 32.047791481018066,
+          "size": 119250444
+        },
+        "zstd_per_file": {
+          "compress_s": 1.6942685379999602,
+          "decompress_s": 0.2805014659998051,
+          "peak_mem_mb": 48.15550231933594,
+          "size": 119073067
+        }
+      },
+      "name": "very_large_corpus_512mb",
+      "raw_size": 536875501,
+      "realism": "synthetic",
+      "structured": true
+    }
+  ],
+  "determinism_passed": true,
+  "final_verdict": "PRODUCTION_EDGE_PARTIAL",
+  "generated_at": "2026-05-03T17:13:40Z",
+  "memory_measurement": "Python tracemalloc peak per method",
+  "python_version": "3.12.3 (main, Mar  3 2026, 12:15:18) [GCC 13.3.0]"
+}
