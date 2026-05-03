@@ -224,7 +224,10 @@ def _build_raw_tarzstd_archive(tarzstd_bytes: bytes) -> bytes:
 def _encode_uvarint(value: int) -> bytes:
     """Encode a non-negative integer as an unsigned varint."""
     if value < 0:
-        raise ValueError("unsigned varint cannot encode negative values")
+        raise ValueError(
+            "unsigned varint cannot encode negative values; "
+            "use _encode_signed_varints for signed integers"
+        )
     out = bytearray()
     while True:
         byte = value & 0x7F
@@ -437,7 +440,12 @@ def _decode_column(column: dict, expected_count: int) -> List[str]:
             raise ValueError("Corrupt column encoding: RLE length mismatch")
         return decoded
 
-    raise ValueError(f"Unsupported column encoding: {encoding}")
+    raise ValueError(
+        "Unsupported column encoding: "
+        f"{encoding}. Supported encodings are: "
+        f"{_ENCODING_RAW}, {_ENCODING_VARINT}, {_ENCODING_DELTA}, "
+        f"{_ENCODING_DICTIONARY}, {_ENCODING_RLE}"
+    )
 
 
 def _encode_row_refs(row_refs: List[List[int]]) -> dict:
@@ -454,7 +462,10 @@ def _encode_row_refs(row_refs: List[List[int]]) -> dict:
         else:
             file_delta = file_id
         if file_delta < 0:
-            raise ValueError("row_refs must be sorted by file_id in ascending order")
+            raise ValueError(
+                "row_refs must be sorted by file_id in ascending order "
+                f"(prev_file_id={prev_file_id}, current_file_id={file_id})"
+            )
         if have_prev and file_id == prev_file_id:
             line_delta = line_index - prev_line_index
         else:
@@ -485,7 +496,9 @@ def _decode_row_refs(encoded_row_refs: Any) -> List[List[int]]:
         return encoded_row_refs
 
     if encoded_row_refs["encoding"] != _ROW_REF_ENCODING:
-        raise ValueError("Unsupported row_refs encoding")
+        raise ValueError(
+            f"Unsupported row_refs encoding: {encoded_row_refs['encoding']}"
+        )
 
     count = encoded_row_refs["count"]
     file_deltas = _decode_uvarints(bytes(encoded_row_refs["file_deltas"]), count)
