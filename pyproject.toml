@@ -16,6 +16,9 @@ dependencies = [
 [project.scripts]
 mc = "metacompressor.cli:main"
 
+[tool.setuptools.packages.find]
+exclude = ["results*", "mc_test_output*", "tmp_metacompressor_test*"]
+
 [tool.pytest.ini_options]
 testpaths = ["metacompressor/tests"]
 markers = [
