@@ -140,18 +140,7 @@ def gen_nearly_identical_lines(tmp: Path) -> Path:
 
 
 def gen_high_cardinality(tmp: Path) -> Path:
-    """Every line has a unique free-form key – no template reuse."""
-    words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"]
-    lines = [
-        f"[{w1}] [{w2}] [{w3}] event=none\n".format(
-            w1=words[i % 8], w2=words[(i * 3) % 8], w3=words[(i * 7) % 8]
-        ).encode()
-        for i, (w1, w2, w3) in enumerate(
-            (words[i % 8], words[(i * 3) % 8], words[(i * 7) % 8]) for i in range(800)
-        )
-    ]
-    # This creates lines with 8^3 possible combos but repeated – give truly
-    # unique content by appending a unique salt per line.
+    """Every line carries a random payload so no template key ever recurs."""
     unique_lines = [
         f"free-form message idx={i} payload={os.urandom(6).hex()}\n".encode()
         for i in range(400)
@@ -460,8 +449,9 @@ class TestRobustness:
         # Spot-check a few files
         for i in [0, 100, 499]:
             expected = (corpus / f"logs/day{i:04d}.log").read_bytes()
-            assert (out / f"logs/day{i:04d}.log").read_bytes() == expected, \
+            assert (out / f"logs/day{i:04d}.log").read_bytes() == expected, (
                 f"Mismatch for day{i:04d}.log"
+            )
 
         tz = tar_zstd_compress_dir(corpus)
         _record("A-many_small_files", "PASS", len(archive), len(tz),
