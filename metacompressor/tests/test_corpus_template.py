@@ -213,7 +213,12 @@ class TestMetrics:
         corpus_dir = make_corpus(tmp_path, files)
         _, metrics = compress_corpus_template_with_metrics(corpus_dir)
         timing = metrics["timing"]
-        assert set(timing.keys()) == {"extract_s", "serialize_s", "zstd_s", "total_s"}
+        # extract_s encompasses the whole extraction phase (tokenize+count+encode);
+        # tokenize_s, count_s, encode_s give per-phase granularity.
+        assert set(timing.keys()) == {
+            "tokenize_s", "count_s", "encode_s",
+            "extract_s", "serialize_s", "zstd_s", "total_s",
+        }
 
     def test_timing_non_negative(self, tmp_path):
         from metacompressor.corpus_template import compress_corpus_template_with_metrics
