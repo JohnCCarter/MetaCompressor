@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metacompressor"
+version = "0.1.0"
+description = "Deterministic lossless compression using chunking + deduplication + Zstandard"
+requires-python = ">=3.9"
+dependencies = [
+    "zstandard>=0.22",
+    "xxhash>=3.0",
+    "msgpack>=1.0",
+]
+
+[project.scripts]
+mc = "metacompressor.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["metacompressor/tests"]
