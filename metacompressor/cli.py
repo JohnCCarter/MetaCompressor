@@ -22,6 +22,7 @@ import zstandard as zstd
 from metacompressor.compressor import compress
 from metacompressor.decompressor import decompress
 from metacompressor.corpus import compress_corpus, decompress_corpus
+from metacompressor.log_template import compress_log
 
 
 def _read(path: str) -> bytes:
@@ -150,6 +151,11 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     zstd_total = sum(len(cctx.compress(d)) for _, d in file_data)
     zstd_time = time.perf_counter() - t0
 
+    # --- Template mode per-file ---
+    t0 = time.perf_counter()
+    template_total = sum(len(compress_log(d)) for _, d in file_data)
+    template_time = time.perf_counter() - t0
+
     def ratio(compressed: int) -> str:
         if total_original == 0:
             return "N/A"
@@ -166,11 +172,19 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
         f"ZSTD per-file   : {zstd_total:>12,} bytes  ratio {ratio(zstd_total)}"
         f"  time {zstd_time*1000:.1f} ms"
     )
+    print(
+        f"Template per-file: {template_total:>11,} bytes  ratio {ratio(template_total)}"
+        f"  time {template_time*1000:.1f} ms"
+    )
     if total_original > 0:
         saving = zstd_total - mc_size
         pct = saving / zstd_total * 100 if zstd_total else 0
         sign = "+" if saving >= 0 else ""
         print(f"MC vs ZSTD      : {sign}{saving:,} bytes  ({sign}{pct:.1f}%)")
+        tpl_saving = zstd_total - template_total
+        tpl_pct = tpl_saving / zstd_total * 100 if zstd_total else 0
+        tpl_sign = "+" if tpl_saving >= 0 else ""
+        print(f"Template vs ZSTD: {tpl_sign}{tpl_saving:,} bytes  ({tpl_sign}{tpl_pct:.1f}%)")
 
 
 def build_parser() -> argparse.ArgumentParser:
