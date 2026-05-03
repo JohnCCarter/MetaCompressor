@@ -281,8 +281,8 @@ def _zigzag_encode(value: int) -> int:
 
 def _zigzag_decode(value: int) -> int:
     """Decode a zigzag-encoded integer."""
-    # Standard zigzag decode: even values map to non-negative integers, odd
-    # values map to negative integers.
+    # Standard zigzag decode: even values decode via ``value >> 1`` and odd
+    # values decode via ``-((value >> 1) + 1)``.
     return (value >> 1) ^ -(value & 1)
 
 
@@ -1112,7 +1112,9 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
                 file_bytes = raw_files[file_entry["raw_file_id"]]
             else:
                 lines = file_lines[file_id]
-                if lines is None or any(line is None for line in lines):
+                if lines is None:
+                    raise ValueError("Corrupt columnar archive: incomplete file reconstruction")
+                if any(line is None for line in lines):
                     raise ValueError("Corrupt columnar archive: incomplete file reconstruction")
                 file_bytes = "\n".join(lines).encode("utf-8")
 
