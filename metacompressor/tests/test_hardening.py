@@ -632,7 +632,7 @@ def _write_hardening_report_fixture():  # noqa: PT004
 class TestLargeStructuredLogs:
     """100 MB structured log compression (skipped if memory < 800 MB)."""
 
-    @pytest.mark.medium
+    @pytest.mark.large
     def test_50mb_structured_logs(self, tmp_path):
         """50 MB single-file structured log corpus."""
         size_mb = 50
@@ -908,6 +908,7 @@ class TestLargeNginx:
 
 
 class TestLargeNDJSON:
+    @pytest.mark.large
     def test_50k_ndjson_lines_round_trip(self, tmp_path):
         """50 000 NDJSON event lines."""
         corpus = gen_large_ndjson(tmp_path, n=50_000)
@@ -1375,7 +1376,7 @@ class TestHardeningRegressionGate:
                 f"by {delta_pct:.1f}% – structured data regression"
             )
 
-    @pytest.mark.medium
+    @pytest.mark.large
     def test_regression_structured_50mb(self, tmp_path):
         """50 MB repetitive structured log must not regress vs TAR+ZSTD."""
         corpus = gen_structured_logs(tmp_path, 50)

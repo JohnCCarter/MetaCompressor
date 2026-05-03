@@ -407,6 +407,7 @@ class TestRobustness:
         tz = tar_zstd_compress_dir(corpus)
         _record("A-single_byte", "PASS", len(archive), len(tz), "single-byte file")
 
+    @pytest.mark.large
     def test_large_file(self, tmp_path):
         corpus = gen_large_file(tmp_path, size_mb=10)
         tracemalloc.start()
@@ -773,6 +774,7 @@ class TestPerformance:
         corpus = _write_corpus(tmp_path, files)
         self._measure(corpus, "D-perf_small", "10 × 5 KB structured logs")
 
+    @pytest.mark.medium
     def test_medium_corpus_perf(self, tmp_path):
         """20 files × ~100 KB each ≈ 2 MB total."""
         line = b"2024-01-01T00:00:00Z INFO req={n} path=/api/v1 status=200 lat=12ms\n"
@@ -783,6 +785,7 @@ class TestPerformance:
         corpus = _write_corpus(tmp_path, files)
         self._measure(corpus, "D-perf_medium", "20 × ~100 KB structured logs ≈ 2 MB")
 
+    @pytest.mark.large
     def test_large_corpus_perf(self, tmp_path):
         """5 files × 2 MB each ≈ 10 MB total."""
         line = b"METRIC host=server-01 cpu=50 mem=1024 ts=2024-01-01T00:00:00Z\n"
