@@ -290,8 +290,7 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     print()
     print("--- Delta (MC corpus-template vs baselines) ---")
     print(format_delta(mck_size, tar_zstd, "TAR+ZSTD"))
-    print(format_delta(mck_size, zstd_total, "ZSTD per-file").replace(
-        "MC corpus-template", "MC corpus-template"))
+    print(format_delta(mck_size, zstd_total, "ZSTD per-file"))
 
     print()
     print("--- Corpus-template timing breakdown ---")

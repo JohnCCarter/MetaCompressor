@@ -187,20 +187,20 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
     # --- first pass: decode files and collect all lines --------------------
     t_extract_start = time.perf_counter()
 
-    file_info: List[Tuple[str, Optional[List[str]], Optional[bytes]]] = []
+    file_info: List[Tuple[str, Optional[List[str]], bytes]] = []
     for file_path in all_files:
         rel = file_path.relative_to(input_dir).as_posix()
         raw = file_path.read_bytes()
         try:
             text = raw.decode("utf-8")
             lines = text.split("\n")
-            file_info.append((rel, lines, None))
+            file_info.append((rel, lines, raw))
         except UnicodeDecodeError:
             file_info.append((rel, None, raw))
 
     # --- count template-key occurrences across *all* text files -----------
     tpl_count: Dict[Tuple[str, ...], int] = {}
-    for _, lines, raw_bytes in file_info:
+    for _, lines, _ in file_info:
         if lines is None:
             continue
         for line in lines:
@@ -226,8 +226,8 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
 
     encoded_files: List[dict] = []
     for rel, lines, raw_bytes in file_info:
-        if raw_bytes is not None:
-            # Binary file: single raw-bytes record.
+        if lines is None:
+            # Binary file (UTF-8 decode failed): single raw-bytes record.
             binary_fallback_files += 1
             encoded_files.append({
                 "path": rel,
@@ -251,14 +251,15 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
                 file_raw_lines += 1
 
         # Hybrid fallback: if no lines used template mode, store the file as
-        # raw bytes to avoid the overhead of per-line raw records.
+        # its original raw bytes to avoid per-line raw-record overhead.
+        # Use the already-read raw_bytes (preserved from first pass) so that
+        # the stored bytes are byte-for-byte identical to the original file.
         if file_tpl_lines == 0 and lines:
-            original_bytes = "\n".join(lines).encode("utf-8")
             binary_fallback_files += 1
             raw_fallback_lines += file_raw_lines
             encoded_files.append({
                 "path": rel,
-                "records": [[-2, original_bytes]],
+                "records": [[-2, raw_bytes]],
             })
         else:
             template_reuse_count += file_tpl_lines
