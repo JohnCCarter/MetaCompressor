@@ -281,6 +281,8 @@ def _zigzag_encode(value: int) -> int:
 
 def _zigzag_decode(value: int) -> int:
     """Decode a zigzag-encoded integer."""
+    # Standard zigzag decode: even values map to non-negative integers, odd
+    # values map to negative integers.
     return (value >> 1) ^ -(value & 1)
 
 
@@ -402,7 +404,9 @@ def _decode_column(column: dict, expected_count: int) -> List[str]:
         values = msgpack.unpackb(bytes(column["data"]), raw=False)
         if len(values) != expected_count:
             raise ValueError("Corrupt column encoding: raw column length mismatch")
-        return [value if isinstance(value, str) else str(value) for value in values]
+        if any(not isinstance(value, str) for value in values):
+            raise ValueError("Corrupt column encoding: raw column contains non-string values")
+        return values
 
     if encoding == _ENCODING_VARINT:
         return [str(value) for value in _decode_signed_varints(bytes(column["data"]), expected_count)]
@@ -510,7 +514,7 @@ def _decode_row_refs(encoded_row_refs: Any) -> List[List[int]]:
     have_prev = False
 
     for file_delta, line_delta in zip(file_deltas, line_deltas):
-        file_id = prev_file_id + file_delta if have_prev else file_delta
+        file_id = prev_file_id + file_delta
         if have_prev and file_id == prev_file_id:
             line_index = prev_line_index + line_delta
         else:
@@ -1110,7 +1114,7 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
                 lines = file_lines[file_id]
                 if lines is None or any(line is None for line in lines):
                     raise ValueError("Corrupt columnar archive: incomplete file reconstruction")
-                file_bytes = "\n".join(line for line in lines if line is not None).encode("utf-8")
+                file_bytes = "\n".join(lines).encode("utf-8")
 
             out_path = output_dir / rel_path
             out_path.parent.mkdir(parents=True, exist_ok=True)
