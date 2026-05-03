@@ -62,29 +62,61 @@ _MIN_TEMPLATE_OCCURRENCES = 2
 # Tokenisation
 # ---------------------------------------------------------------------------
 
-# Matches integers, floats (including negative values), and simple
-# scientific-notation numbers.  The optional leading ``-`` allows values like
-# ``temperature=-5`` or ``delta=-1.5e2`` to be extracted as variable tokens
-# alongside their positive counterparts under the same template.
-# Using a capturing group with re.split causes the matches to be interleaved
-# with the surrounding text in the returned list.
-_NUM_RE = re.compile(r"(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)")
+# Extended variable pattern — tried in priority order (most specific first).
+#
+# Captures the following token types as variable slots:
+#
+#   UUID              8-4-4-4-12 lowercase/uppercase hex groups
+#   ISO 8601 datetime YYYY-MM-DDThh:mm:ss with optional fractional seconds and
+#                     timezone suffix (Z or ±HH:MM / ±HHMM)
+#   IPv4 + port       dotted-quad with optional :port
+#   0x hex string     0x followed by one or more hex digits
+#   URL               http:// or https:// scheme followed by non-whitespace
+#   Number            signed integer / float / scientific notation (existing)
+#
+# Using a single capturing group with re.split causes variable matches to be
+# interleaved with the surrounding text in the returned list, which makes exact
+# reconstruction trivial (re-interleave text parts with captured values).
+_VAR_RE = re.compile(
+    r"("
+    # UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    # Nginx/Apache access log timestamp: [DD/Mon/YYYY:HH:MM:SS ±ZZZZ]
+    # Captures the entire bracket as one token, avoiding spurious variable slots
+    # for the constant day/year/hour/timezone fields common in access logs.
+    r"|\[\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}\]"
+    # ISO 8601 datetime (date+time separator required; timezone optional)
+    r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
+    # IPv4 address with optional :port (before plain numbers to avoid partial match)
+    r"|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d{1,5})?"
+    # Hex string with 0x prefix
+    r"|0x[0-9a-fA-F]+"
+    # URL with http or https scheme
+    r"|https?://\S+"
+    # Number: signed integer, float, or scientific notation (existing behaviour)
+    r"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
+    r")"
+)
 
 
 def _tokenize(line: str) -> Tuple[Tuple[str, ...], List[str]]:
     """Split *line* into *(template_key, values)*.
 
-    *template_key* is a tuple of the non-numeric text fragments (the "skeleton"
-    of the line).  *values* is a list of the numeric substrings in order.
+    *template_key* is a tuple of the non-variable text fragments (the
+    "skeleton" of the line).  *values* is a list of the extracted variable
+    substrings in order.
+
+    Recognised variable types (matched in priority order):
+    UUID, ISO-8601 datetime, IPv4(+port), 0x-hex, URL, number.
 
     Reconstruction is exact: interleaving the text parts with the values
     reproduces the original line character-for-character.
     """
-    parts = _NUM_RE.split(line)
-    # re.split with one capturing group → [text, num, text, num, …, text]
+    parts = _VAR_RE.split(line)
+    # re.split with one capturing group → [text, var, text, var, …, text]
     text_parts: Tuple[str, ...] = tuple(parts[0::2])
-    num_parts: List[str] = list(parts[1::2])
-    return text_parts, num_parts
+    var_parts: List[str] = list(parts[1::2])
+    return text_parts, var_parts
 
 
 def _template_string(text_parts: Tuple[str, ...]) -> str:

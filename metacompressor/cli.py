@@ -2,9 +2,9 @@
 
 Commands
 --------
-mc compress                <input>           <output.mc1>
+mc compress                <input>           <output.mc1>  [--chunking fixed|cdc]
 mc decompress              <input.mc1>       <output>
-mc compare                 <input>
+mc compare                 <input>           [--chunking fixed|cdc]
 mc compress-dir            <input_dir>       <output.mc1dir>
 mc decompress-dir          <input.mc1dir>    <output_dir>
 mc compress-template-dir   <input_dir>       <output.mck>
@@ -23,11 +23,12 @@ from pathlib import Path
 
 import zstandard as zstd
 
-from metacompressor.compressor import compress
+from metacompressor.compressor import compress, CHUNKING_FIXED, CHUNKING_CDC
 from metacompressor.decompressor import decompress
 from metacompressor.corpus import compress_corpus, decompress_corpus
 from metacompressor.corpus_template import (
     compress_corpus_template,
+    compress_corpus_template_with_metrics,
     decompress_corpus_template,
 )
 from metacompressor.log_template import compress_log
@@ -41,9 +42,13 @@ def _write(path: str, data: bytes) -> None:
     Path(path).write_bytes(data)
 
 
+def _get_chunking(args: argparse.Namespace) -> str:
+    return getattr(args, "chunking", CHUNKING_FIXED) or CHUNKING_FIXED
+
+
 def cmd_compress(args: argparse.Namespace) -> None:
     data = _read(args.input)
-    mc1 = compress(data)
+    mc1 = compress(data, chunking_mode=_get_chunking(args))
     _write(args.output, mc1)
     ratio = len(mc1) / len(data) if data else float("nan")
     print(f"Compressed {len(data):,} → {len(mc1):,} bytes  (ratio {ratio:.3f})")
@@ -59,10 +64,11 @@ def cmd_decompress(args: argparse.Namespace) -> None:
 def cmd_compare(args: argparse.Namespace) -> None:
     data = _read(args.input)
     original_size = len(data)
+    chunking_mode = _get_chunking(args)
 
     # --- MetaCompressor ---
     t0 = time.perf_counter()
-    mc1 = compress(data)
+    mc1 = compress(data, chunking_mode=chunking_mode)
     mc_time = time.perf_counter() - t0
     mc_size = len(mc1)
 
@@ -85,6 +91,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         return f"{compressed / original_size:.4f}"
 
     print(f"File            : {args.input}")
+    print(f"Chunking mode   : {chunking_mode}")
     print(f"Original size   : {original_size:>12,} bytes")
     print(f"MC size         : {mc_size:>12,} bytes  ratio {ratio(mc_size)}  time {mc_time*1000:.1f} ms")
     print(f"ZSTD size       : {zstd_size:>12,} bytes  ratio {ratio(zstd_size)}  time {zstd_time*1000:.1f} ms")
@@ -188,6 +195,26 @@ def _tar_zstd_size(file_data: list) -> int:
     return len(cctx.compress(tar_bytes))
 
 
+def format_delta(mc_size: int, baseline_size: int, baseline_label: str) -> str:
+    """Return a human-readable delta line comparing *mc_size* to *baseline_size*.
+
+    Examples
+    --------
+    MC corpus-template is 20,898 bytes (11.1%) SMALLER than TAR+ZSTD.
+    MC corpus-template is 5,200 bytes (2.8%) LARGER than TAR+ZSTD.
+    MC corpus-template is equal in size to TAR+ZSTD.
+    """
+    delta = mc_size - baseline_size
+    if baseline_size == 0:
+        return f"(baseline size is 0, delta not meaningful)"
+    pct = abs(delta) / baseline_size * 100
+    if delta < 0:
+        return f"MC corpus-template is {abs(delta):,} bytes ({pct:.1f}%) SMALLER than {baseline_label}."
+    if delta > 0:
+        return f"MC corpus-template is {delta:,} bytes ({pct:.1f}%) LARGER than {baseline_label}."
+    return f"MC corpus-template is equal in size to {baseline_label}."
+
+
 def cmd_compare_dir(args: argparse.Namespace) -> None:
     """Compare MC corpus / corpus-template / per-file ZSTD / TAR+ZSTD on a directory."""
     input_dir = Path(args.input_dir)
@@ -210,11 +237,10 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     mc_time = time.perf_counter() - t0
     mc_size = len(mc1dir)
 
-    # --- Corpus template (shared template dictionary) ---
-    t0 = time.perf_counter()
-    mck = compress_corpus_template(input_dir)
-    mck_time = time.perf_counter() - t0
+    # --- Corpus template (shared template dictionary + metrics) ---
+    mck, metrics = compress_corpus_template_with_metrics(input_dir)
     mck_size = len(mck)
+    mck_timing = metrics["timing"]
 
     # --- Zstandard per-file (level 3) ---
     cctx = zstd.ZstdCompressor(level=3)
@@ -246,7 +272,7 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     )
     print(
         f"MC corpus-template   : {mck_size:>12,} bytes  ratio {ratio(mck_size)}"
-        f"  time {mck_time*1000:.1f} ms"
+        f"  time {mck_timing['total_s']*1000:.1f} ms"
     )
     print(
         f"ZSTD per-file        : {zstd_total:>12,} bytes  ratio {ratio(zstd_total)}"
@@ -260,17 +286,29 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
         f"TAR+ZSTD             : {tar_zstd:>12,} bytes  ratio {ratio(tar_zstd)}"
         f"  time {tar_zstd_time*1000:.1f} ms"
     )
-    if total_original > 0:
-        def _savings_line(label: str, compressed_size: int, baseline_size: int, b_label: str) -> str:
-            saving = baseline_size - compressed_size
-            pct = saving / baseline_size * 100 if baseline_size else 0
-            sign = "+" if saving >= 0 else ""
-            return f"{label} vs {b_label}: {sign}{saving:,} bytes  ({sign}{pct:.1f}%)"
 
-        print(_savings_line("MC corpus", mc_size, zstd_total, "ZSTD per-file"))
-        print(_savings_line("MC corpus", mc_size, tar_zstd, "TAR+ZSTD"))
-        print(_savings_line("MC corpus-template", mck_size, zstd_total, "ZSTD per-file"))
-        print(_savings_line("MC corpus-template", mck_size, tar_zstd, "TAR+ZSTD"))
+    print()
+    print("--- Delta (MC corpus-template vs baselines) ---")
+    print(format_delta(mck_size, tar_zstd, "TAR+ZSTD"))
+    print(format_delta(mck_size, zstd_total, "ZSTD per-file"))
+
+    print()
+    print("--- Corpus-template timing breakdown ---")
+    print(f"  Template extraction : {mck_timing['extract_s']*1000:>8.1f} ms")
+    print(f"  Serialisation       : {mck_timing['serialize_s']*1000:>8.1f} ms")
+    print(f"  Zstd compression    : {mck_timing['zstd_s']*1000:>8.1f} ms")
+    print(f"  Total               : {mck_timing['total_s']*1000:>8.1f} ms")
+
+    print()
+    print("--- Corpus-template explainability ---")
+    print(f"  Files               : {metrics['num_files']}")
+    print(f"  Lines               : {metrics['num_lines']:,}")
+    print(f"  Shared templates    : {metrics['num_shared_templates']:,}")
+    print(f"  Template reuse count: {metrics['template_reuse_count']:,}")
+    print(f"  Template reuse rate : {metrics['template_reuse_rate']*100:.1f}%")
+    print(f"  Raw fallback lines  : {metrics['raw_fallback_lines']:,}")
+    print(f"  Binary fallback files:{metrics['binary_fallback_files']}")
+    print(f"  Avg vars/tpl line   : {metrics['avg_vars_per_tpl_line']:.2f}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -283,6 +321,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_compress = sub.add_parser("compress", help="Compress a file to .mc1")
     p_compress.add_argument("input", help="Input file path")
     p_compress.add_argument("output", help="Output .mc1 file path")
+    p_compress.add_argument(
+        "--chunking",
+        choices=[CHUNKING_FIXED, CHUNKING_CDC],
+        default=CHUNKING_FIXED,
+        help="Chunking mode: 'fixed' (default) or 'cdc'",
+    )
     p_compress.set_defaults(func=cmd_compress)
 
     p_decompress = sub.add_parser("decompress", help="Decompress a .mc1 file")
@@ -292,6 +336,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_compare = sub.add_parser("compare", help="Compare MC vs ZSTD compression")
     p_compare.add_argument("input", help="Input file path")
+    p_compare.add_argument(
+        "--chunking",
+        choices=[CHUNKING_FIXED, CHUNKING_CDC],
+        default=CHUNKING_FIXED,
+        help="Chunking mode: 'fixed' (default) or 'cdc'",
+    )
     p_compare.set_defaults(func=cmd_compare)
 
     p_compress_dir = sub.add_parser("compress-dir", help="Compress a directory to .mc1dir (corpus mode)")
