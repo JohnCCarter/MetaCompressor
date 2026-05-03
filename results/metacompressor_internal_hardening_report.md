@@ -6,15 +6,41 @@
 
 | Dataset | Raw | MC corpus-template | TAR+ZSTD | Delta % | Per-file ZSTD | gzip | brotli | Compress s | Decomp s | Peak MB | Winner | Notes |
 |---------|----:|-------------------:|---------:|-------:|-------------:|-----:|-------:|-----------:|---------:|--------:|--------|-------|
-| H-100mb_structured | 104,857,600 | 476 | 9,823 | -95.2% | 9,677 | 356,204 | — | 115.986s | 3.479s | 1342.3 MB | MC | 100 MB structured log; tpl_reuse=1.00; ratio=0.000005 |
-| H-250mb_structured | 262,144,000 | 626 | 24,224 | -97.4% | — | — | — | 295.731s | 7.623s | 3330.3 MB | MC | 250 MB structured log; tpl_reuse=1.00; ratio=0.000002; peak_mem=3330 MB; raw_fb=False |
-| H-500mb_structured | 524,288,000 | 882 | 48,222 | -98.2% | — | — | — | 616.694s | 14.911s | 6667.8 MB | MC | 500 MB structured log; tpl_reuse=1.00; ratio=0.000002; peak_mem=6668 MB; raw_fb=False |
+| H-50mb_structured | 52,428,800 | 428 | 5,022 | -91.5% | 4,877 | 178,232 | — | 57.769s | 1.366s | 670.4 MB | MC | 50 MB structured log; tpl_reuse=1.00; ratio=0.00001 |
+| H-2000_small_files | 152,679 | 2,156 | 38,900 | -94.5% | 145,326 | 54,023 | — | 3.070s | 0.093s | 19.4 MB | MC | 2 000 small files; tpl_reuse=1.00; files=2000 |
+| H-mixed_app_logs | 146,392 | 4,141 | 9,670 | -57.2% | 7,679 | 13,968 | — | 0.152s | 0.004s | — | MC | 4 app log formats; tpl_reuse=1.00; templates=7 |
+| H-nginx_10k | 1,183,385 | 13,981 | 117,223 | -88.1% | 117,045 | 156,902 | — | 1.284s | 0.030s | — | MC | 10 000 nginx lines; tpl_reuse=1.00; templates=1; low_struct_fb=0 |
+| H-ndjson_50k | 5,346,556 | 13,227 | 225,618 | -94.1% | 225,197 | 436,341 | — | 13.708s | 0.135s | 172.4 MB | MC | 50k NDJSON lines; tpl_reuse=1.00; templates=1 |
+| H-prose | 184,915 | 40,477 | 40,806 | -0.8% | 40,592 | 35,501 | — | — | — | — | gzip | prose text; tpl_reuse=0.00; binary_fb=1; low_struct_fb=0 |
+| H-low_struct_fallback | — | — | — | — | — | — | — | — | — | — | — | low-structure fallback fires; low_struct_fb=1 |
+| H-low_struct_size | — | 479 | 584 | -18.0% | 394 | — | — | — | — | — | per-file-zstd | low-struct size test; Δ=-18.0%; low_struct_fb=1 |
+| H-highcard_2k | 170,690 | 45,470 | 43,520 | 4.5% | 43,333 | 45,011 | — | — | — | — | per-file-zstd | 2000 lines; recurring tpl; random vals; tpl_reuse=0.42; Δ=4.5% |
+| H-random_binary_mix | 470,304 | 98,834 | 98,823 | 0.0% | 98,485 | — | — | — | — | — | per-file-zstd | random+structured mix; binary_fb=2; tpl_reuse=1.00 |
+| H-precompressed_mix | 40,177 | 314 | 449 | -30.1% | 249 | — | — | — | — | — | per-file-zstd | gz+zst+log; binary_fb=2; tpl_reuse=1.00 |
+| H-binary_fb_lossless | — | — | — | — | — | — | — | — | — | — | — | 20 random-binary files; all must round-trip without corruption |
+| H-hybrid_fb_lossless | — | — | — | — | — | — | — | — | — | — | — | 50 unique-template lines → hybrid fallback → lossless |
+| H-low_struct_fb_lossless | — | — | — | — | — | — | — | — | — | — | — | ~3% template rate → low-structure fallback; low_struct_fb=1 |
+| H-no_silent_corruption_large | — | — | — | — | — | — | — | — | — | — | — | corrupt archive raised exception (correct) |
+| H-reg_structured_50mb | — | 428 | 5,022 | -91.5% | — | — | — | — | — | — | MC | Δ=-91.5% – within threshold |
+| H-reg_mixed_app_logs | — | 4,141 | 9,652 | -57.1% | — | — | — | — | — | — | MC | Δ=-57.1% – within threshold |
+| H-reg_2000_small | — | 2,156 | 39,071 | -94.5% | — | — | — | — | — | — | MC | Δ=-94.5% – within threshold |
+| H-reg_prose | — | 40,477 | 40,807 | -0.8% | — | — | — | — | — | — | MC | Δ=-0.8% – within threshold |
+| H-reg_random_binary | — | 65,602 | 65,731 | -0.2% | — | — | — | — | — | — | MC | Δ=-0.2% – within threshold |
+| H-determinism_10mb | — | 387 | — | — | — | — | — | — | — | — | MC | two independent compressions of identical 10 MB corpus → identical bytes |
+| H-determinism_200files | — | 615 | — | — | — | — | — | — | — | — | MC | 200 small files, two runs → identical bytes |
 
 ## Where MC Wins
 
-- **H-100mb_structured**: MC=476 vs TAR+ZSTD=9,823 (Δ=-95.2%)  100 MB structured log; tpl_reuse=1.00; ratio=0.000005
-- **H-250mb_structured**: MC=626 vs TAR+ZSTD=24,224 (Δ=-97.4%)  250 MB structured log; tpl_reuse=1.00; ratio=0.000002; peak_mem=3330 MB; raw_fb=False
-- **H-500mb_structured**: MC=882 vs TAR+ZSTD=48,222 (Δ=-98.2%)  500 MB structured log; tpl_reuse=1.00; ratio=0.000002; peak_mem=6668 MB; raw_fb=False
+- **H-50mb_structured**: MC=428 vs TAR+ZSTD=5,022 (Δ=-91.5%)  50 MB structured log; tpl_reuse=1.00; ratio=0.00001
+- **H-2000_small_files**: MC=2,156 vs TAR+ZSTD=38,900 (Δ=-94.5%)  2 000 small files; tpl_reuse=1.00; files=2000
+- **H-mixed_app_logs**: MC=4,141 vs TAR+ZSTD=9,670 (Δ=-57.2%)  4 app log formats; tpl_reuse=1.00; templates=7
+- **H-nginx_10k**: MC=13,981 vs TAR+ZSTD=117,223 (Δ=-88.1%)  10 000 nginx lines; tpl_reuse=1.00; templates=1; low_struct_fb=0
+- **H-ndjson_50k**: MC=13,227 vs TAR+ZSTD=225,618 (Δ=-94.1%)  50k NDJSON lines; tpl_reuse=1.00; templates=1
+- **H-low_struct_size**: MC=479 vs TAR+ZSTD=584 (Δ=-18.0%)  low-struct size test; Δ=-18.0%; low_struct_fb=1
+- **H-precompressed_mix**: MC=314 vs TAR+ZSTD=449 (Δ=-30.1%)  gz+zst+log; binary_fb=2; tpl_reuse=1.00
+- **H-reg_structured_50mb**: MC=428 vs TAR+ZSTD=5,022 (Δ=-91.5%)  Δ=-91.5% – within threshold
+- **H-reg_mixed_app_logs**: MC=4,141 vs TAR+ZSTD=9,652 (Δ=-57.1%)  Δ=-57.1% – within threshold
+- **H-reg_2000_small**: MC=2,156 vs TAR+ZSTD=39,071 (Δ=-94.5%)  Δ=-94.5% – within threshold
 
 **Why MC wins:** Highly repetitive or structured corpora allow the shared template dictionary to deduplicate line structure across many files. When the same log template recurs thousands of times, storing it once and encoding only the variable slots achieves large savings beyond what generic ZSTD compression can achieve, especially for many-small-file corpora where tar overhead dominates TAR+ZSTD.
 
@@ -60,28 +86,24 @@ Peak memory scales with corpus size. For highly repetitive data the tokenisation
 
 ## Slow Cases (compress > 30 s)
 
-- H-100mb_structured: compress 116.0s
-- H-250mb_structured: compress 295.7s
-- H-500mb_structured: compress 616.7s
+- H-50mb_structured: compress 57.8s
 
 ## Memory Spikes (peak > 400 MB)
 
-- H-100mb_structured: 1342.3 MB
-- H-250mb_structured: 3330 MB
-- H-500mb_structured: 6668 MB
+- H-50mb_structured: 670 MB
 
 ## Analysis Notes
 
-*(none)*
+**H-highcard_2k**: MC is 4.5% larger than TAR+ZSTD. Known weakness: recurring template with high-cardinality random variable values. The template dictionary adds overhead (msgpack per-record + value list) while ZSTD can compress the raw hex strings more efficiently. Mitigation: the log_template single-file path compares both modes; corpus_template's global nature makes per-file comparison expensive – documented as a remaining risk.
 
 ## Summary
 
-- Total tests recorded : 3
-- MC wins (Δ < -5%)   : 3
+- Total tests recorded : 22
+- MC wins (Δ < -5%)   : 10
 - MC losses (Δ > +5%) : 0
 - Crashes              : 0
 - Regressions (> 10%) : 0
-- Slow cases           : 3
-- Memory spikes        : 3
+- Slow cases           : 1
+- Memory spikes        : 1
 
 **Final verdict: `INTERNAL_HARDENING_VALIDATED`**
