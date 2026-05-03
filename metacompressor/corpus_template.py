@@ -7,6 +7,9 @@ better compression for corpora of structurally similar text files (log
 rotations, daily exports, config variants, etc.).
 
 Binary files are stored verbatim (UTF-8 decoding failure → raw bytes record).
+Text files whose lines produce no template-mode records are also stored as raw
+bytes (hybrid fallback) so that template overhead never hurts single-file
+or low-structure corpora.
 
 Binary layout (.mck file)
 --------------------------
@@ -27,14 +30,16 @@ Payload (msgpack map)
 
 Public API
 ----------
-compress_corpus_template(input_dir)           -> bytes
-decompress_corpus_template(data, output_dir)  -> list[str]
+compress_corpus_template(input_dir)                     -> bytes
+compress_corpus_template_with_metrics(input_dir)        -> (bytes, dict)
+decompress_corpus_template(data, output_dir)            -> list[str]
 """
 
 from __future__ import annotations
 
 import io
 import re
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -51,18 +56,39 @@ _ZSTD_LEVEL = 3
 _MIN_TEMPLATE_OCCURRENCES = 2
 
 # ---------------------------------------------------------------------------
-# Tokenisation (mirrors log_template._tokenize / _template_string)
+# Tokenisation — extended variable patterns (mirrors log_template._VAR_RE)
 # ---------------------------------------------------------------------------
 
-_NUM_RE = re.compile(r"(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)")
+# Extended variable pattern — tried in priority order (most specific first).
+# See log_template._VAR_RE for full documentation.
+_VAR_RE = re.compile(
+    r"("
+    # UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    # ISO 8601 datetime (date+time separator required; timezone optional)
+    r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
+    # IPv4 address with optional :port (before plain numbers to avoid partial match)
+    r"|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d{1,5})?"
+    # Hex string with 0x prefix
+    r"|0x[0-9a-fA-F]+"
+    # URL with http or https scheme
+    r"|https?://\S+"
+    # Number: signed integer, float, or scientific notation (existing behaviour)
+    r"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
+    r")"
+)
 
 
 def _tokenize(line: str) -> Tuple[Tuple[str, ...], List[str]]:
-    """Split *line* into *(template_key, numeric_values)*."""
-    parts = _NUM_RE.split(line)
+    """Split *line* into *(template_key, values)*.
+
+    Recognised variable types (matched in priority order):
+    UUID, ISO-8601 datetime, IPv4(+port), 0x-hex, URL, number.
+    """
+    parts = _VAR_RE.split(line)
     text_parts: Tuple[str, ...] = tuple(parts[0::2])
-    num_parts: List[str] = list(parts[1::2])
-    return text_parts, num_parts
+    var_parts: List[str] = list(parts[1::2])
+    return text_parts, var_parts
 
 
 def _template_string(text_parts: Tuple[str, ...]) -> str:
@@ -96,6 +122,14 @@ def _reconstruct_line(template_str: str, values: List[str]) -> str:
 def compress_corpus_template(input_dir: Path) -> bytes:
     """Compress all files under *input_dir* using a shared template dictionary.
 
+    Equivalent to ``compress_corpus_template_with_metrics(input_dir)[0]``.
+    """
+    return compress_corpus_template_with_metrics(input_dir)[0]
+
+
+def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]:
+    """Compress all files under *input_dir* using a shared template dictionary.
+
     Algorithm
     ---------
     1. Walk all files recursively in deterministic order.
@@ -108,6 +142,8 @@ def compress_corpus_template(input_dir: Path) -> bytes:
        - template-mode lines → ``[tpl_id, [val, …]]``
        - non-recurring text lines → ``[-1, raw_line]``
        - binary files → single ``[-2, raw_bytes]`` record
+       - text files with zero template-mode lines → ``[-2, raw_bytes]`` record
+         (hybrid fallback: avoids raw-line overhead for template-poor files)
     6. Serialise: ``MAGIC + VERSION + zstd(msgpack(payload))``.
 
     Parameters
@@ -117,14 +153,31 @@ def compress_corpus_template(input_dir: Path) -> bytes:
 
     Returns
     -------
-    bytes
-        Serialised ``.mck`` byte string.
+    tuple[bytes, dict]
+        ``(compressed_bytes, metrics)`` where *metrics* is a dict with keys:
+
+        - ``num_files``               – total files processed
+        - ``num_lines``               – total text lines across all text files
+        - ``num_shared_templates``    – entries in the shared template dict
+        - ``template_reuse_count``    – total template-mode line records written
+        - ``template_reuse_rate``     – template_reuse_count / num_lines (0–1)
+        - ``raw_fallback_lines``      – lines stored verbatim (``[-1, ...]``)
+        - ``binary_fallback_files``   – files stored as raw bytes (UTF-8 failure
+                                        or hybrid fallback)
+        - ``avg_vars_per_tpl_line``   – average number of variable slots used
+                                        across template-mode lines
+        - ``compressed_size``         – byte length of the compressed output
+        - ``timing``                  – sub-timing dict with keys
+                                        ``extract_s``, ``serialize_s``,
+                                        ``zstd_s``, ``total_s``
 
     Raises
     ------
     ValueError
         If *input_dir* is not a directory.
     """
+    t_total_start = time.perf_counter()
+
     input_dir = Path(input_dir)
     if not input_dir.is_dir():
         raise ValueError(f"Not a directory: {input_dir}")
@@ -132,22 +185,22 @@ def compress_corpus_template(input_dir: Path) -> bytes:
     all_files = sorted(p for p in input_dir.rglob("*") if p.is_file())
 
     # --- first pass: decode files and collect all lines --------------------
-    # Each entry is (rel_path, lines_or_None, raw_bytes_or_None)
-    # lines_or_None is None for binary files.
-    file_info: List[Tuple[str, Optional[List[str]], Optional[bytes]]] = []
+    t_extract_start = time.perf_counter()
+
+    file_info: List[Tuple[str, Optional[List[str]], bytes]] = []
     for file_path in all_files:
         rel = file_path.relative_to(input_dir).as_posix()
         raw = file_path.read_bytes()
         try:
             text = raw.decode("utf-8")
             lines = text.split("\n")
-            file_info.append((rel, lines, None))
+            file_info.append((rel, lines, raw))
         except UnicodeDecodeError:
             file_info.append((rel, None, raw))
 
     # --- count template-key occurrences across *all* text files -----------
     tpl_count: Dict[Tuple[str, ...], int] = {}
-    for _, lines, raw_bytes in file_info:
+    for _, lines, _ in file_info:
         if lines is None:
             continue
         for line in lines:
@@ -155,7 +208,6 @@ def compress_corpus_template(input_dir: Path) -> bytes:
             tpl_count[tkey] = tpl_count.get(tkey, 0) + 1
 
     # --- build shared template dictionary ---------------------------------
-    # Maintain first-occurrence order for determinism.
     tpl_to_id: Dict[Tuple[str, ...], int] = {}
     tpl_strings: List[str] = []
     for tkey, cnt in tpl_count.items():
@@ -165,10 +217,18 @@ def compress_corpus_template(input_dir: Path) -> bytes:
                 tpl_strings.append(_template_string(tkey))
 
     # --- second pass: encode each file ------------------------------------
+    # Metrics accumulators
+    total_lines = 0
+    template_reuse_count = 0
+    raw_fallback_lines = 0
+    binary_fallback_files = 0
+    total_var_slots = 0  # sum of variable counts across template-mode lines
+
     encoded_files: List[dict] = []
     for rel, lines, raw_bytes in file_info:
-        if raw_bytes is not None:
-            # Binary file: single raw-bytes record.
+        if lines is None:
+            # Binary file (UTF-8 decode failed): single raw-bytes record.
+            binary_fallback_files += 1
             encoded_files.append({
                 "path": rel,
                 "records": [[-2, raw_bytes]],
@@ -176,19 +236,76 @@ def compress_corpus_template(input_dir: Path) -> bytes:
             continue
 
         records: List = []
+        file_tpl_lines = 0
+        file_raw_lines = 0
+        file_var_total = 0
         for line in lines:
+            total_lines += 1
             tkey, values = _tokenize(line)
             if tkey in tpl_to_id:
                 records.append([tpl_to_id[tkey], values])
+                file_tpl_lines += 1
+                file_var_total += len(values)
             else:
                 records.append([-1, line])
-        encoded_files.append({"path": rel, "records": records})
+                file_raw_lines += 1
 
+        # Hybrid fallback: if no lines used template mode, store the file as
+        # its original raw bytes to avoid per-line raw-record overhead.
+        # Use the already-read raw_bytes (preserved from first pass) so that
+        # the stored bytes are byte-for-byte identical to the original file.
+        if file_tpl_lines == 0 and lines:
+            binary_fallback_files += 1
+            raw_fallback_lines += file_raw_lines
+            encoded_files.append({
+                "path": rel,
+                "records": [[-2, raw_bytes]],
+            })
+        else:
+            template_reuse_count += file_tpl_lines
+            raw_fallback_lines += file_raw_lines
+            total_var_slots += file_var_total
+            encoded_files.append({"path": rel, "records": records})
+
+    t_extract_s = time.perf_counter() - t_extract_start
+
+    # --- serialise --------------------------------------------------------
+    t_serialize_start = time.perf_counter()
     payload = {"templates": tpl_strings, "files": encoded_files}
     raw_payload = msgpack.packb(payload, use_bin_type=True)
+    t_serialize_s = time.perf_counter() - t_serialize_start
+
+    t_zstd_start = time.perf_counter()
     cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
     compressed = cctx.compress(raw_payload)
-    return MAGIC + bytes([VERSION]) + compressed
+    t_zstd_s = time.perf_counter() - t_zstd_start
+
+    result = MAGIC + bytes([VERSION]) + compressed
+    t_total_s = time.perf_counter() - t_total_start
+
+    avg_vars = (
+        total_var_slots / template_reuse_count if template_reuse_count > 0 else 0.0
+    )
+    reuse_rate = template_reuse_count / total_lines if total_lines > 0 else 0.0
+
+    metrics = {
+        "num_files": len(all_files),
+        "num_lines": total_lines,
+        "num_shared_templates": len(tpl_strings),
+        "template_reuse_count": template_reuse_count,
+        "template_reuse_rate": reuse_rate,
+        "raw_fallback_lines": raw_fallback_lines,
+        "binary_fallback_files": binary_fallback_files,
+        "avg_vars_per_tpl_line": avg_vars,
+        "compressed_size": len(result),
+        "timing": {
+            "extract_s": t_extract_s,
+            "serialize_s": t_serialize_s,
+            "zstd_s": t_zstd_s,
+            "total_s": t_total_s,
+        },
+    }
+    return result, metrics
 
 
 def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
