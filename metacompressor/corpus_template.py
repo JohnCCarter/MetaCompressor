@@ -16,13 +16,13 @@ Streaming design (two-pass, O(1-file) peak memory)
 Pass 1  Read each file → tokenise + count → discard raw bytes and decoded text
         immediately.  Only the *tok_cache* (unique line → ``(tpl_key, values)``)
         and *tpl_count* (``tpl_key → occurrence count``) survive this pass.
-        Peak memory during pass 1: O(largest_single_file + tok_cache).
+        Peak memory during pass 1: O(largest single file + tok_cache).
 
 Pass 2  Re-read each file → encode using the shared template dict → stream file
         entries one-by-one through a :class:`msgpack.Packer` directly into a
         :class:`zstandard.ZstdCompressor.stream_writer`.  No in-memory
         accumulation of the ``encoded_files`` list.  Peak memory during pass 2:
-        O(largest_single_file + tok_cache + tpl_strings + compressed_output).
+        O(largest single file + tok_cache + tpl_strings + compressed_output).
 
 Win/loss map
 ------------
@@ -284,7 +284,7 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
     #
     # Read each file, tokenise, count, then discard raw bytes and decoded text.
     # Only tok_cache and tpl_count survive this pass, keeping peak memory at
-    # O(largest_single_file + tok_cache) instead of O(entire_corpus).
+    # O(largest single file + tok_cache) instead of O(entire_corpus).
     # -----------------------------------------------------------------------
     t_extract_start = time.perf_counter()
 

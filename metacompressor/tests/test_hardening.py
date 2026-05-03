@@ -1508,12 +1508,18 @@ class TestXLargeCorpora:
 
     def test_250mb_structured_logs(self, tmp_path):
         """250 MB single-file structured log (skipped if < 2 000 MB RAM)."""
+        # The ~8× multiplier (2 000 MB for a 250 MB corpus) accounts for:
+        # tok_cache Python strings, the compressed output, the TAR+ZSTD baseline
+        # build (uncompressed TAR ≈ 250 MB), and general Python process overhead.
         if _available_mb() < 2000:
             pytest.skip("Insufficient memory for 250 MB test (need ≥ 2 000 MB)")
         _measure_xlarge(tmp_path, 250, "H-250mb_structured")
 
     def test_500mb_structured_logs(self, tmp_path):
         """500 MB single-file structured log (skipped if < 4 000 MB RAM)."""
+        # Same ~8× multiplier as the 250 MB test; the uncompressed TAR during
+        # the fallback comparison step peaks at ≈ corpus size, so we budget
+        # 4 000 MB for a 500 MB corpus.
         if _available_mb() < 4000:
             pytest.skip("Insufficient memory for 500 MB test (need ≥ 4 000 MB)")
         _measure_xlarge(tmp_path, 500, "H-500mb_structured")
