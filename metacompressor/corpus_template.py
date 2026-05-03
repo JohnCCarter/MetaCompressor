@@ -224,7 +224,7 @@ def _build_raw_tarzstd_archive(tarzstd_bytes: bytes) -> bytes:
 def _encode_uvarint(value: int) -> bytes:
     """Encode a non-negative integer as an unsigned varint."""
     if value < 0:
-        raise ValueError("uvarint cannot encode negative values")
+        raise ValueError("unsigned varint cannot encode negative values")
     out = bytearray()
     while True:
         byte = value & 0x7F
@@ -261,8 +261,13 @@ def _decode_uvarints(data: bytes, expected_count: int) -> List[int]:
             break
         value = 0
         shift = 0
-    if len(values) != expected_count or consumed != len(data):
-        raise ValueError("Corrupt column encoding: unexpected varint length")
+    if len(values) != expected_count:
+        raise ValueError(
+            "Corrupt column encoding: "
+            f"expected {expected_count} values but decoded {len(values)}"
+        )
+    if consumed != len(data):
+        raise ValueError("Corrupt column encoding: unconsumed bytes in varint data")
     return values
 
 
@@ -449,13 +454,16 @@ def _encode_row_refs(row_refs: List[List[int]]) -> dict:
         else:
             file_delta = file_id
         if file_delta < 0:
-            raise ValueError("row_refs must be in deterministic archive order")
+            raise ValueError("row_refs must be sorted by file_id in ascending order")
         if have_prev and file_id == prev_file_id:
             line_delta = line_index - prev_line_index
         else:
             line_delta = line_index
         if line_delta < 0:
-            raise ValueError("row_refs line indices must be non-decreasing per file")
+            raise ValueError(
+                "row_refs line indices must be non-decreasing within each file "
+                f"(file_id={file_id}, prev_index={prev_line_index}, current_index={line_index})"
+            )
 
         file_deltas.append(file_delta)
         line_deltas.append(line_delta)
@@ -672,7 +680,11 @@ def _build_columnar_template_archive(
                 }
                 template_blocks[tpl_id] = block
             elif len(block["columns"]) != len(values):
-                raise ValueError("Template column count mismatch")
+                raise ValueError(
+                    "Template column count mismatch: "
+                    f"expected {len(block['columns'])} columns but got {len(values)} "
+                    f"for template {tpl_id}"
+                )
 
             block["row_refs"].append([file_id, line_index])
             for column_index, value in enumerate(values):
