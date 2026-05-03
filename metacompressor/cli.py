@@ -2,9 +2,9 @@
 
 Commands
 --------
-mc compress                <input>           <output.mc1>
+mc compress                <input>           <output.mc1>  [--chunking fixed|cdc]
 mc decompress              <input.mc1>       <output>
-mc compare                 <input>
+mc compare                 <input>           [--chunking fixed|cdc]
 mc compress-dir            <input_dir>       <output.mc1dir>
 mc decompress-dir          <input.mc1dir>    <output_dir>
 mc compress-template-dir   <input_dir>       <output.mck>
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import zstandard as zstd
 
-from metacompressor.compressor import compress
+from metacompressor.compressor import compress, CHUNKING_FIXED, CHUNKING_CDC
 from metacompressor.decompressor import decompress
 from metacompressor.corpus import compress_corpus, decompress_corpus
 from metacompressor.corpus_template import (
@@ -41,9 +41,13 @@ def _write(path: str, data: bytes) -> None:
     Path(path).write_bytes(data)
 
 
+def _get_chunking(args: argparse.Namespace) -> str:
+    return getattr(args, "chunking", CHUNKING_FIXED) or CHUNKING_FIXED
+
+
 def cmd_compress(args: argparse.Namespace) -> None:
     data = _read(args.input)
-    mc1 = compress(data)
+    mc1 = compress(data, chunking_mode=_get_chunking(args))
     _write(args.output, mc1)
     ratio = len(mc1) / len(data) if data else float("nan")
     print(f"Compressed {len(data):,} → {len(mc1):,} bytes  (ratio {ratio:.3f})")
@@ -59,10 +63,11 @@ def cmd_decompress(args: argparse.Namespace) -> None:
 def cmd_compare(args: argparse.Namespace) -> None:
     data = _read(args.input)
     original_size = len(data)
+    chunking_mode = _get_chunking(args)
 
     # --- MetaCompressor ---
     t0 = time.perf_counter()
-    mc1 = compress(data)
+    mc1 = compress(data, chunking_mode=chunking_mode)
     mc_time = time.perf_counter() - t0
     mc_size = len(mc1)
 
@@ -85,6 +90,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         return f"{compressed / original_size:.4f}"
 
     print(f"File            : {args.input}")
+    print(f"Chunking mode   : {chunking_mode}")
     print(f"Original size   : {original_size:>12,} bytes")
     print(f"MC size         : {mc_size:>12,} bytes  ratio {ratio(mc_size)}  time {mc_time*1000:.1f} ms")
     print(f"ZSTD size       : {zstd_size:>12,} bytes  ratio {ratio(zstd_size)}  time {zstd_time*1000:.1f} ms")
@@ -283,6 +289,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_compress = sub.add_parser("compress", help="Compress a file to .mc1")
     p_compress.add_argument("input", help="Input file path")
     p_compress.add_argument("output", help="Output .mc1 file path")
+    p_compress.add_argument(
+        "--chunking",
+        choices=[CHUNKING_FIXED, CHUNKING_CDC],
+        default=CHUNKING_FIXED,
+        help="Chunking mode: 'fixed' (default) or 'cdc'",
+    )
     p_compress.set_defaults(func=cmd_compress)
 
     p_decompress = sub.add_parser("decompress", help="Decompress a .mc1 file")
@@ -292,6 +304,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_compare = sub.add_parser("compare", help="Compare MC vs ZSTD compression")
     p_compare.add_argument("input", help="Input file path")
+    p_compare.add_argument(
+        "--chunking",
+        choices=[CHUNKING_FIXED, CHUNKING_CDC],
+        default=CHUNKING_FIXED,
+        help="Chunking mode: 'fixed' (default) or 'cdc'",
+    )
     p_compare.set_defaults(func=cmd_compare)
 
     p_compress_dir = sub.add_parser("compress-dir", help="Compress a directory to .mc1dir (corpus mode)")
