@@ -13,6 +13,8 @@ import zstandard as zstd
 from metacompressor.corpus_template import (
     MAGIC,
     VERSION,
+    _MODE_COLUMNAR_V1,
+    _MODE_COLUMNAR_V2,
     _tokenize,
     compress_corpus_template,
     compress_corpus_template_with_metrics,
@@ -365,7 +367,11 @@ class TestStructureExtractionV2:
 
 
 class TestColumnarMode:
-    def test_columnar_round_trip(self, tmp_path):
+    def test_columnar_round_trip(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "metacompressor.corpus_template._CORPUS_FALLBACK_THRESHOLD",
+            float("inf"),
+        )
         files = {
             "a.log": b"".join(
                 f"INFO seq={i} status={i % 5} user={i % 9} code={200 + (i % 3)}\n".encode()
@@ -378,7 +384,7 @@ class TestColumnarMode:
         }
         corpus_dir = make_corpus(tmp_path, files)
         archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
-        assert metrics["final_selected_mode"] == "corpus_template_columnar_v1"
+        assert metrics["final_selected_mode"] == _MODE_COLUMNAR_V2
 
         out_dir = tmp_path / "out"
         decompress_corpus_template(archive, out_dir)
@@ -386,10 +392,14 @@ class TestColumnarMode:
             assert (out_dir / rel).read_bytes() == data
 
         payload = unpack_payload(archive)
-        assert payload["mode"] == "corpus_template_columnar_v1"
+        assert payload["mode"] == _MODE_COLUMNAR_V2
         assert "template_blocks" in payload
 
-    def test_columnar_output_is_deterministic(self, tmp_path):
+    def test_columnar_output_is_deterministic(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "metacompressor.corpus_template._CORPUS_FALLBACK_THRESHOLD",
+            float("inf"),
+        )
         files = {
             "a.log": b"INFO seq=1 status=200\nINFO seq=2 status=200\n" * 120,
             "b.log": b"INFO seq=100 status=500\nINFO seq=101 status=500\n" * 120,
@@ -400,9 +410,38 @@ class TestColumnarMode:
         archive1, metrics1 = compress_corpus_template_with_metrics(dir1)
         archive2, metrics2 = compress_corpus_template_with_metrics(dir2)
 
-        assert metrics1["final_selected_mode"] == "corpus_template_columnar_v1"
-        assert metrics2["final_selected_mode"] == "corpus_template_columnar_v1"
+        assert metrics1["final_selected_mode"] == _MODE_COLUMNAR_V2
+        assert metrics2["final_selected_mode"] == _MODE_COLUMNAR_V2
         assert archive1 == archive2
+
+    def test_columnar_block_flushing_round_trip(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "metacompressor.corpus_template._CORPUS_FALLBACK_THRESHOLD",
+            float("inf"),
+        )
+        files = {
+            "flush.log": b"".join(
+                f"INFO seq={i} status={i % 5} user={i % 7}\n".encode()
+                for i in range(500)
+            )
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        monkeypatch.setattr(
+            "metacompressor.corpus_template._MAX_COLUMNAR_BLOCK_ROWS",
+            32,
+        )
+
+        archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["final_selected_mode"] == _MODE_COLUMNAR_V2
+
+        payload = unpack_payload(archive)
+        block_lists = [entry for entry in payload["template_blocks"] if entry is not None]
+        assert block_lists
+        assert any(len(entry) > 1 for entry in block_lists)
+
+        out_dir = tmp_path / "out_flush"
+        decompress_corpus_template(archive, out_dir)
+        assert (out_dir / "flush.log").read_bytes() == files["flush.log"]
 
     def test_old_row_mode_archive_still_decompresses(self, tmp_path):
         payload = {
@@ -423,6 +462,37 @@ class TestColumnarMode:
         )
 
         out_dir = tmp_path / "out"
+        extracted = decompress_corpus_template(archive, out_dir)
+
+        assert extracted == ["legacy.log"]
+        assert (out_dir / "legacy.log").read_bytes() == b"INFO seq=1 status=200\nINFO seq=2 status=404"
+
+    def test_old_columnar_v1_archive_still_decompresses(self, tmp_path):
+        payload = {
+            "mode": _MODE_COLUMNAR_V1,
+            "templates": ["INFO seq={} status={}"],
+            "files": [{"path": "legacy.log", "kind": "text", "num_lines": 2}],
+            "template_blocks": [
+                {
+                    "row_refs": [[0, 0], [0, 1]],
+                    "columns": [
+                        {"encoding": "raw_msgpack", "data": msgpack.packb(["1", "2"], use_bin_type=True)},
+                        {"encoding": "raw_msgpack", "data": msgpack.packb(["200", "404"], use_bin_type=True)},
+                    ],
+                }
+            ],
+            "raw_files": [],
+            "metadata": {"raw_lines": []},
+        }
+        archive = (
+            MAGIC
+            + bytes([VERSION])
+            + zstd.ZstdCompressor(level=3).compress(
+                msgpack.packb(payload, use_bin_type=True)
+            )
+        )
+
+        out_dir = tmp_path / "out_v1"
         extracted = decompress_corpus_template(archive, out_dir)
 
         assert extracted == ["legacy.log"]
@@ -474,12 +544,16 @@ class TestColumnarMode:
         assert metrics["raw_column_fallback_count"] >= 1
         assert metrics["column_encoding_counts"].get("raw_msgpack", 0) >= 1
 
-    def test_no_trailing_newline_with_columnar_mode(self, tmp_path):
+    def test_no_trailing_newline_with_columnar_mode(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "metacompressor.corpus_template._CORPUS_FALLBACK_THRESHOLD",
+            float("inf"),
+        )
         lines = [f"INFO seq={i}".encode() for i in range(1, 200)]
         files = {"nonl.log": b"\n".join(lines)}
         corpus_dir = make_corpus(tmp_path, files)
         archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
-        assert metrics["final_selected_mode"] == "corpus_template_columnar_v1"
+        assert metrics["final_selected_mode"] == _MODE_COLUMNAR_V2
         out_dir = tmp_path / "out"
         decompress_corpus_template(archive, out_dir)
         assert (out_dir / "nonl.log").read_bytes() == files["nonl.log"]

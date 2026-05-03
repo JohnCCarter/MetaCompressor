@@ -92,7 +92,7 @@ import tarfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import msgpack
 import zstandard as zstd
@@ -108,6 +108,7 @@ _MIN_TEMPLATE_OCCURRENCES = 2
 _MODE_RAW_TAR_ZSTD = "raw_tar_zstd"
 _MODE_ROW_V1 = "corpus_template_row_v1"
 _MODE_COLUMNAR_V1 = "corpus_template_columnar_v1"
+_MODE_COLUMNAR_V2 = "corpus_template_columnar_v2"
 
 _ENCODING_RAW = "raw_msgpack"
 _ENCODING_VARINT = "varint"
@@ -128,6 +129,7 @@ _CORPUS_FALLBACK_THRESHOLD = 1.10
 # msgpack record overhead for semi-structured files where template reuse is
 # sparse.  Set to 0.0 to disable (original behaviour for non-zero cases).
 _MIN_FILE_TEMPLATE_RATE = 0.10
+_MAX_COLUMNAR_BLOCK_ROWS = 262_144
 
 # ---------------------------------------------------------------------------
 # Structure extraction v2
@@ -503,6 +505,23 @@ def _msgpack_size(obj: Any) -> int:
     return len(msgpack.packb(obj, use_bin_type=True))
 
 
+def _iter_text_lines(file_path: Path) -> Iterator[str]:
+    """Yield lines using ``str.split("\\n")`` semantics without loading the full file."""
+    saw_any = False
+    ended_with_newline = False
+    with file_path.open("r", encoding="utf-8", newline="") as handle:
+        for raw_line in handle:
+            saw_any = True
+            if raw_line.endswith("\n"):
+                ended_with_newline = True
+                yield raw_line[:-1]
+            else:
+                ended_with_newline = False
+                yield raw_line
+    if not saw_any or ended_with_newline:
+        yield ""
+
+
 def _pack_archive_payload(payload: dict, level: int = _ZSTD_LEVEL) -> bytes:
     """Pack *payload* as an ``.mck`` archive."""
     raw = msgpack.packb(payload, use_bin_type=True)
@@ -511,11 +530,21 @@ def _pack_archive_payload(payload: dict, level: int = _ZSTD_LEVEL) -> bytes:
 
 def _build_tarzstd_bytes(input_dir: Path, all_files: List[Path]) -> bytes:
     """Return a TAR+ZSTD baseline archive for *all_files*."""
-    tar_buf = io.BytesIO()
-    with tarfile.open(fileobj=tar_buf, mode="w") as tar:
-        for file_path in all_files:
-            tar.add(str(file_path), arcname=file_path.relative_to(input_dir).as_posix())
-    return zstd.ZstdCompressor(level=_ZSTD_LEVEL).compress(tar_buf.getvalue())
+    output = io.BytesIO()
+    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(output, closefd=False) as compressor:
+        with tarfile.open(fileobj=compressor, mode="w|") as tar:
+            for file_path in all_files:
+                info = tarfile.TarInfo(name=file_path.relative_to(input_dir).as_posix())
+                info.size = file_path.stat().st_size
+                info.mtime = 0
+                info.uid = 0
+                info.gid = 0
+                info.uname = ""
+                info.gname = ""
+                info.mode = 0o644
+                with file_path.open("rb") as source:
+                    tar.addfile(info, source)
+    return output.getvalue()
 
 
 def _build_raw_tarzstd_archive(tarzstd_bytes: bytes) -> bytes:
@@ -862,40 +891,35 @@ def _build_row_template_archive(
 
         t_serialize_start = time.perf_counter()
         for file_path, (rel, is_binary) in zip(all_files, file_meta):
-            raw = file_path.read_bytes()
-
             if is_binary:
+                raw = file_path.read_bytes()
                 binary_fallback_files += 1
                 fallback_reason_counts["binary"] = fallback_reason_counts.get("binary", 0) + 1
                 compressor.write(packer.pack({"path": rel, "records": [[-2, raw]]}))
                 continue
 
-            text = raw.decode("utf-8")
-            lines = text.split("\n")
-            records: List[Any] = []
             file_tpl_lines = 0
             file_raw_lines = 0
             file_var_total = 0
-            for line in lines:
+            file_total_lines = 0
+            for line in _iter_text_lines(file_path):
+                file_total_lines += 1
                 analysis = tok_cache[line]
                 tkey = analysis.template_parts
-                values = list(analysis.values)
                 if tkey in tpl_to_id:
-                    records.append([tpl_to_id[tkey], values])
                     file_tpl_lines += 1
-                    file_var_total += len(values)
+                    file_var_total += len(analysis.values)
                 else:
-                    records.append([-1, line])
                     file_raw_lines += 1
 
-            file_total_lines = len(lines)
             file_template_rate = (
                 file_tpl_lines / file_total_lines if file_total_lines > 0 else 0.0
             )
             if (
                 (file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE)
-                and lines
+                and file_total_lines > 0
             ):
+                raw = file_path.read_bytes()
                 binary_fallback_files += 1
                 if file_tpl_lines > 0:
                     low_structure_fallback_files += 1
@@ -912,7 +936,19 @@ def _build_row_template_archive(
                 template_reuse_count += file_tpl_lines
                 raw_fallback_lines += file_raw_lines
                 total_var_slots += file_var_total
-                compressor.write(packer.pack({"path": rel, "records": records}))
+                compressor.write(packer.pack_map_header(2))
+                compressor.write(packer.pack("path"))
+                compressor.write(packer.pack(rel))
+                compressor.write(packer.pack("records"))
+                compressor.write(packer.pack_array_header(file_total_lines))
+                for line in _iter_text_lines(file_path):
+                    analysis = tok_cache[line]
+                    tkey = analysis.template_parts
+                    tpl_id = tpl_to_id.get(tkey)
+                    if tpl_id is None:
+                        compressor.write(packer.pack([-1, line]))
+                    else:
+                        compressor.write(packer.pack([tpl_id, list(analysis.values)]))
 
     t_serialize_s = time.perf_counter() - t_serialize_start
     t_encode_s = time.perf_counter() - t_encode_start
@@ -928,6 +964,78 @@ def _build_row_template_archive(
     }
 
 
+def _finalize_columnar_block(
+    template_blocks: List[Optional[List[dict]]],
+    active_blocks: List[Optional[dict]],
+    tpl_id: int,
+    column_encoding_counts: Dict[str, int],
+) -> Tuple[int, int]:
+    """Encode and store the active block for *tpl_id*."""
+    block = active_blocks[tpl_id]
+    if block is None:
+        return 0, 0
+
+    encoded_columns: List[dict] = []
+    num_encoded_columns = 0
+    raw_column_fallback_count = 0
+    for column_values in block["columns"]:
+        encoded_column = _encode_column(column_values)
+        encoding = encoded_column["encoding"]
+        column_encoding_counts[encoding] = column_encoding_counts.get(encoding, 0) + 1
+        if encoding == _ENCODING_RAW:
+            raw_column_fallback_count += 1
+        else:
+            num_encoded_columns += 1
+        encoded_columns.append(encoded_column)
+
+    if template_blocks[tpl_id] is None:
+        template_blocks[tpl_id] = []
+    template_blocks[tpl_id].append(
+        {"row_refs": _encode_row_refs(block["row_refs"]), "columns": encoded_columns}
+    )
+    active_blocks[tpl_id] = None
+    return num_encoded_columns, raw_column_fallback_count
+
+
+def _pack_columnar_archive(
+    mode: str,
+    tpl_strings: List[str],
+    files_payload: List[dict],
+    template_blocks: List[Optional[List[dict]]],
+    raw_files: List[bytes],
+    raw_lines: List[List[Any]],
+) -> bytes:
+    """Pack the columnar payload without staging a full msgpack blob in RAM."""
+    output = io.BytesIO()
+    output.write(MAGIC + bytes([VERSION]))
+    packer = msgpack.Packer(use_bin_type=True)
+
+    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(output, closefd=False) as compressor:
+        compressor.write(packer.pack_map_header(6))
+        compressor.write(packer.pack("mode"))
+        compressor.write(packer.pack(mode))
+        compressor.write(packer.pack("templates"))
+        compressor.write(packer.pack(tpl_strings))
+        compressor.write(packer.pack("files"))
+        compressor.write(packer.pack(files_payload))
+        compressor.write(packer.pack("template_blocks"))
+        compressor.write(packer.pack_array_header(len(template_blocks)))
+        for template_block_list in template_blocks:
+            compressor.write(packer.pack(template_block_list))
+        compressor.write(packer.pack("raw_files"))
+        compressor.write(packer.pack_array_header(len(raw_files)))
+        for raw_file in raw_files:
+            compressor.write(packer.pack(raw_file))
+        compressor.write(packer.pack("metadata"))
+        compressor.write(packer.pack_map_header(1))
+        compressor.write(packer.pack("raw_lines"))
+        compressor.write(packer.pack_array_header(len(raw_lines)))
+        for raw_line in raw_lines:
+            compressor.write(packer.pack(raw_line))
+
+    return output.getvalue()
+
+
 def _build_columnar_template_archive(
     all_files: List[Path],
     file_meta: List[Tuple[str, bool]],
@@ -935,7 +1043,7 @@ def _build_columnar_template_archive(
     tpl_to_id: Dict[Tuple[str, ...], int],
     tpl_strings: List[str],
 ) -> Tuple[bytes, dict]:
-    """Build the columnar corpus-template v1 archive."""
+    """Build the block-flushed columnar corpus-template archive."""
     template_reuse_count = 0
     raw_fallback_lines = 0
     binary_fallback_files = 0
@@ -946,54 +1054,52 @@ def _build_columnar_template_archive(
     files_payload: List[dict] = []
     raw_files: List[bytes] = []
     raw_lines: List[List[Any]] = []
-    template_blocks: List[Optional[dict]] = [None] * len(tpl_strings)
+    template_blocks: List[Optional[List[dict]]] = [None] * len(tpl_strings)
+    active_blocks: List[Optional[dict]] = [None] * len(tpl_strings)
+    column_encoding_counts: Dict[str, int] = {}
+    num_encoded_columns = 0
+    raw_column_fallback_count = 0
 
     t_encode_start = time.perf_counter()
     for file_path, (rel, is_binary) in zip(all_files, file_meta):
         file_id = len(files_payload)
-        raw = file_path.read_bytes()
-
         if is_binary:
             files_payload.append(
                 {"path": rel, "kind": "raw", "raw_file_id": len(raw_files)}
             )
+            raw = file_path.read_bytes()
             raw_files.append(raw)
             binary_fallback_files += 1
             fallback_reason_counts["binary"] = fallback_reason_counts.get("binary", 0) + 1
             continue
 
-        text = raw.decode("utf-8")
-        lines = text.split("\n")
-        file_tpl_records: List[Tuple[int, int, List[str]]] = []
-        file_raw_records: List[Tuple[int, str]] = []
         file_tpl_lines = 0
         file_raw_lines = 0
         file_var_total = 0
+        file_total_lines = 0
 
-        for line_index, line in enumerate(lines):
+        for line in _iter_text_lines(file_path):
+            file_total_lines += 1
             analysis = tok_cache[line]
             tkey = analysis.template_parts
-            values = list(analysis.values)
             tpl_id = tpl_to_id.get(tkey)
             if tpl_id is None:
-                file_raw_records.append((line_index, line))
                 file_raw_lines += 1
             else:
-                file_tpl_records.append((line_index, tpl_id, values))
                 file_tpl_lines += 1
-                file_var_total += len(values)
+                file_var_total += len(analysis.values)
 
-        file_total_lines = len(lines)
         file_template_rate = (
             file_tpl_lines / file_total_lines if file_total_lines > 0 else 0.0
         )
         if (
             (file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE)
-            and lines
+            and file_total_lines > 0
         ):
             files_payload.append(
                 {"path": rel, "kind": "raw", "raw_file_id": len(raw_files)}
             )
+            raw = file_path.read_bytes()
             raw_files.append(raw)
             binary_fallback_files += 1
             if file_tpl_lines > 0:
@@ -1008,22 +1114,27 @@ def _build_columnar_template_archive(
             raw_fallback_lines += file_raw_lines
             continue
 
-        files_payload.append({"path": rel, "kind": "text", "num_lines": len(lines)})
+        files_payload.append({"path": rel, "kind": "text", "num_lines": file_total_lines})
         template_reuse_count += file_tpl_lines
         raw_fallback_lines += file_raw_lines
         total_var_slots += file_var_total
 
-        for line_index, line in file_raw_records:
-            raw_lines.append([file_id, line_index, line])
+        for line_index, line in enumerate(_iter_text_lines(file_path)):
+            analysis = tok_cache[line]
+            tkey = analysis.template_parts
+            tpl_id = tpl_to_id.get(tkey)
+            if tpl_id is None:
+                raw_lines.append([file_id, line_index, line])
+                continue
 
-        for line_index, tpl_id, values in file_tpl_records:
-            block = template_blocks[tpl_id]
+            values = list(analysis.values)
+            block = active_blocks[tpl_id]
             if block is None:
                 block = {
                     "row_refs": [],
                     "columns": [[] for _ in range(len(values))],
                 }
-                template_blocks[tpl_id] = block
+                active_blocks[tpl_id] = block
             elif len(block["columns"]) != len(values):
                 raise ValueError(
                     "Template column count mismatch: "
@@ -1034,42 +1145,43 @@ def _build_columnar_template_archive(
             block["row_refs"].append([file_id, line_index])
             for column_index, value in enumerate(values):
                 block["columns"][column_index].append(value)
+            if len(block["row_refs"]) >= _MAX_COLUMNAR_BLOCK_ROWS:
+                encoded_count, raw_count = _finalize_columnar_block(
+                    template_blocks,
+                    active_blocks,
+                    tpl_id,
+                    column_encoding_counts,
+                )
+                num_encoded_columns += encoded_count
+                raw_column_fallback_count += raw_count
 
     t_serialize_start = time.perf_counter()
-    encoded_blocks: List[Optional[dict]] = []
-    column_encoding_counts: Dict[str, int] = {}
     num_columnar_templates = 0
-    num_encoded_columns = 0
-    raw_column_fallback_count = 0
 
-    for block in template_blocks:
-        if block is None:
-            encoded_blocks.append(None)
+    for tpl_id, block in enumerate(active_blocks):
+        if block is not None:
+            encoded_count, raw_count = _finalize_columnar_block(
+                template_blocks,
+                active_blocks,
+                tpl_id,
+                column_encoding_counts,
+            )
+            num_encoded_columns += encoded_count
+            raw_column_fallback_count += raw_count
+
+    for block_list in template_blocks:
+        if block_list is None:
             continue
         num_columnar_templates += 1
-        encoded_columns: List[dict] = []
-        for column_values in block["columns"]:
-            encoded_column = _encode_column(column_values)
-            encoding = encoded_column["encoding"]
-            column_encoding_counts[encoding] = column_encoding_counts.get(encoding, 0) + 1
-            if encoding == _ENCODING_RAW:
-                raw_column_fallback_count += 1
-            else:
-                num_encoded_columns += 1
-            encoded_columns.append(encoded_column)
-        encoded_blocks.append(
-            {"row_refs": _encode_row_refs(block["row_refs"]), "columns": encoded_columns}
-        )
 
-    payload = {
-        "mode": _MODE_COLUMNAR_V1,
-        "templates": tpl_strings,
-        "files": files_payload,
-        "template_blocks": encoded_blocks,
-        "raw_files": raw_files,
-        "metadata": {"raw_lines": raw_lines},
-    }
-    result = _pack_archive_payload(payload)
+    result = _pack_columnar_archive(
+        mode=_MODE_COLUMNAR_V2,
+        tpl_strings=tpl_strings,
+        files_payload=files_payload,
+        template_blocks=template_blocks,
+        raw_files=raw_files,
+        raw_lines=raw_lines,
+    )
     t_serialize_s = time.perf_counter() - t_serialize_start
     t_encode_s = time.perf_counter() - t_encode_start
     return result, {
@@ -1232,17 +1344,19 @@ def compress_corpus_template_with_metrics(
     t_tokenize_start = time.perf_counter()
     for file_path in all_files:
         rel = file_path.relative_to(input_dir).as_posix()
-        raw = file_path.read_bytes()
+        file_legacy_tpl_count: Dict[Tuple[str, ...], int] = {}
+        file_tpl_count: Dict[Tuple[str, ...], int] = {}
+        file_normalized_tpl_count: Dict[Tuple[str, ...], int] = {}
+        file_json_template_keys: Dict[Tuple[str, ...], int] = {}
+        file_total_lines = 0
+        file_json_lines = 0
         try:
-            text = raw.decode("utf-8")
-            lines = text.split("\n")
-            file_meta.append((rel, False))
-            for line in lines:
-                total_lines += 1
+            for line in _iter_text_lines(file_path):
+                file_total_lines += 1
                 if line not in legacy_tok_cache:
                     legacy_tok_cache[line] = _tokenize_legacy(line)
                 legacy_tkey = legacy_tok_cache[line][0]
-                legacy_tpl_count[legacy_tkey] = legacy_tpl_count.get(legacy_tkey, 0) + 1
+                file_legacy_tpl_count[legacy_tkey] = file_legacy_tpl_count.get(legacy_tkey, 0) + 1
 
                 if line not in tok_cache:
                     tok_cache[line] = (
@@ -1263,15 +1377,30 @@ def compress_corpus_template_with_metrics(
                     )
                 analysis = tok_cache[line]
                 tkey = analysis.template_parts
-                tpl_count[tkey] = tpl_count.get(tkey, 0) + 1
-                normalized_tpl_count[analysis.normalized_skeleton] = (
-                    normalized_tpl_count.get(analysis.normalized_skeleton, 0) + 1
+                file_tpl_count[tkey] = file_tpl_count.get(tkey, 0) + 1
+                file_normalized_tpl_count[analysis.normalized_skeleton] = (
+                    file_normalized_tpl_count.get(analysis.normalized_skeleton, 0) + 1
                 )
                 if analysis.is_json:
-                    json_lines_detected += 1
-                    json_template_keys[analysis.json_structure_key] = (
-                        json_template_keys.get(analysis.json_structure_key, 0) + 1
+                    file_json_lines += 1
+                    file_json_template_keys[analysis.json_structure_key] = (
+                        file_json_template_keys.get(analysis.json_structure_key, 0) + 1
                     )
+            file_meta.append((rel, False))
+            total_lines += file_total_lines
+            for tkey, count in file_legacy_tpl_count.items():
+                legacy_tpl_count[tkey] = legacy_tpl_count.get(tkey, 0) + count
+            for tkey, count in file_tpl_count.items():
+                tpl_count[tkey] = tpl_count.get(tkey, 0) + count
+            for skeleton, count in file_normalized_tpl_count.items():
+                normalized_tpl_count[skeleton] = (
+                    normalized_tpl_count.get(skeleton, 0) + count
+                )
+            json_lines_detected += file_json_lines
+            for json_key, count in file_json_template_keys.items():
+                json_template_keys[json_key] = (
+                    json_template_keys.get(json_key, 0) + count
+                )
         except UnicodeDecodeError:
             file_meta.append((rel, True))
         # raw, text, lines are freed at end of each iteration — O(1 file) peak.
@@ -1336,7 +1465,7 @@ def compress_corpus_template_with_metrics(
     columnar_size = len(columnar_result)
     if columnar_size < row_mode_size:
         best_template_result = columnar_result
-        best_template_mode = _MODE_COLUMNAR_V1
+        best_template_mode = _MODE_COLUMNAR_V2
     else:
         best_template_result = row_result
         best_template_mode = _MODE_ROW_V1
@@ -1351,7 +1480,7 @@ def compress_corpus_template_with_metrics(
         result = best_template_result
         final_selected_mode = best_template_mode
         chose_raw_fallback = False
-        if best_template_mode == _MODE_COLUMNAR_V1:
+        if best_template_mode == _MODE_COLUMNAR_V2:
             fallback_reason_counts = dict(columnar_stats["fallback_reason_counts"])
         else:
             fallback_reason_counts = dict(row_stats["fallback_reason_counts"])
@@ -1477,7 +1606,7 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
                     extracted.append(member.name)
         return extracted
 
-    if mode == _MODE_COLUMNAR_V1:
+    if mode in (_MODE_COLUMNAR_V1, _MODE_COLUMNAR_V2):
         templates: List[str] = payload["templates"]
         files = payload["files"]
         raw_files = [bytes(data) for data in payload.get("raw_files", [])]
@@ -1496,25 +1625,30 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
                 raise ValueError("Corrupt columnar archive: raw line for raw file")
             lines[line_index] = line
 
-        for tpl_id, block in enumerate(payload["template_blocks"]):
-            if block is None:
+        for tpl_id, block_entry in enumerate(payload["template_blocks"]):
+            if block_entry is None:
                 continue
-            row_refs = _decode_row_refs(block["row_refs"])
-            row_count = len(row_refs)
-            decoded_columns = [
-                _decode_column(column, row_count)
-                for column in block["columns"]
-            ]
-            for row_index, row_ref in enumerate(row_refs):
-                file_id, line_index = row_ref
-                values = [
-                    decoded_columns[column_index][row_index]
-                    for column_index in range(len(decoded_columns))
+            if mode == _MODE_COLUMNAR_V1:
+                block_iter = [block_entry]
+            else:
+                block_iter = block_entry
+            for block in block_iter:
+                row_refs = _decode_row_refs(block["row_refs"])
+                row_count = len(row_refs)
+                decoded_columns = [
+                    _decode_column(column, row_count)
+                    for column in block["columns"]
                 ]
-                lines = file_lines[file_id]
-                if lines is None:
-                    raise ValueError("Corrupt columnar archive: template row for raw file")
-                lines[line_index] = _reconstruct_line(templates[tpl_id], values)
+                for row_index, row_ref in enumerate(row_refs):
+                    file_id, line_index = row_ref
+                    values = [
+                        decoded_columns[column_index][row_index]
+                        for column_index in range(len(decoded_columns))
+                    ]
+                    lines = file_lines[file_id]
+                    if lines is None:
+                        raise ValueError("Corrupt columnar archive: template row for raw file")
+                    lines[line_index] = _reconstruct_line(templates[tpl_id], values)
 
         for file_id, file_entry in enumerate(files):
             rel_path = file_entry["path"]

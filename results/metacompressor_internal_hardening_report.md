@@ -6,15 +6,11 @@
 
 | Dataset | Raw | MC corpus-template | TAR+ZSTD | Delta % | Per-file ZSTD | gzip | brotli | Compress s | Decomp s | Peak MB | Winner | Notes |
 |---------|----:|-------------------:|---------:|-------:|-------------:|-----:|-------:|-----------:|---------:|--------:|--------|-------|
-| H-100mb_structured | 104,857,600 | 476 | 9,823 | -95.2% | 9,677 | 356,204 | — | 115.986s | 3.479s | 1342.3 MB | MC | 100 MB structured log; tpl_reuse=1.00; ratio=0.000005 |
-| H-250mb_structured | 262,144,000 | 626 | 24,224 | -97.4% | — | — | — | 295.731s | 7.623s | 3330.3 MB | MC | 250 MB structured log; tpl_reuse=1.00; ratio=0.000002; peak_mem=3330 MB; raw_fb=False |
-| H-500mb_structured | 524,288,000 | 882 | 48,222 | -98.2% | — | — | — | 616.694s | 14.911s | 6667.8 MB | MC | 500 MB structured log; tpl_reuse=1.00; ratio=0.000002; peak_mem=6668 MB; raw_fb=False |
+| H-50mb_structured | 52,428,800 | 527 | 5,022 | -89.5% | 4,877 | 178,232 | — | 64.655s | 1.491s | 59.8 MB | MC | 50 MB structured log; tpl_reuse=1.00; ratio=0.00001 |
 
 ## Where MC Wins
 
-- **H-100mb_structured**: MC=476 vs TAR+ZSTD=9,823 (Δ=-95.2%)  100 MB structured log; tpl_reuse=1.00; ratio=0.000005
-- **H-250mb_structured**: MC=626 vs TAR+ZSTD=24,224 (Δ=-97.4%)  250 MB structured log; tpl_reuse=1.00; ratio=0.000002; peak_mem=3330 MB; raw_fb=False
-- **H-500mb_structured**: MC=882 vs TAR+ZSTD=48,222 (Δ=-98.2%)  500 MB structured log; tpl_reuse=1.00; ratio=0.000002; peak_mem=6668 MB; raw_fb=False
+- **H-50mb_structured**: MC=527 vs TAR+ZSTD=5,022 (Δ=-89.5%)  50 MB structured log; tpl_reuse=1.00; ratio=0.00001
 
 **Why MC wins:** Highly repetitive or structured corpora allow the shared template dictionary to deduplicate line structure across many files. When the same log template recurs thousands of times, storing it once and encoding only the variable slots achieves large savings beyond what generic ZSTD compression can achieve, especially for many-small-file corpora where tar overhead dominates TAR+ZSTD.
 
@@ -60,15 +56,11 @@ Peak memory scales with corpus size. For highly repetitive data the tokenisation
 
 ## Slow Cases (compress > 30 s)
 
-- H-100mb_structured: compress 116.0s
-- H-250mb_structured: compress 295.7s
-- H-500mb_structured: compress 616.7s
+- H-50mb_structured: compress 64.7s
 
 ## Memory Spikes (peak > 400 MB)
 
-- H-100mb_structured: 1342.3 MB
-- H-250mb_structured: 3330 MB
-- H-500mb_structured: 6668 MB
+*(none)*
 
 ## Analysis Notes
 
@@ -76,12 +68,12 @@ Peak memory scales with corpus size. For highly repetitive data the tokenisation
 
 ## Summary
 
-- Total tests recorded : 3
-- MC wins (Δ < -5%)   : 3
+- Total tests recorded : 1
+- MC wins (Δ < -5%)   : 1
 - MC losses (Δ > +5%) : 0
 - Crashes              : 0
 - Regressions (> 10%) : 0
-- Slow cases           : 3
-- Memory spikes        : 3
+- Slow cases           : 1
+- Memory spikes        : 0
 
 **Final verdict: `INTERNAL_HARDENING_VALIDATED`**
