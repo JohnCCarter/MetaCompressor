@@ -182,6 +182,144 @@ class TestTemplateMode:
 
 
 # ---------------------------------------------------------------------------
+# Extended tokeniser – new variable types
+# ---------------------------------------------------------------------------
+
+class TestExtendedTokenizer:
+    """Round-trip tests for each variable type recognised by the extended tokeniser."""
+
+    def test_uuid_round_trip(self):
+        uuid = "550e8400-e29b-41d4-a716-446655440000"
+        lines = [f"REQUEST id={uuid} status=200\n"] * 20
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_uuid_template_mode(self):
+        # Verify UUID is extracted as a single variable token (not split).
+        from metacompressor.log_template import _tokenize
+        uuid = "550e8400-e29b-41d4-a716-446655440000"
+        line = f"REQUEST id={uuid} status=200"
+        tkey, values = _tokenize(line)
+        assert uuid in values, f"UUID should be extracted as one variable; got values={values}"
+        # Template skeleton should not contain the UUID digits.
+        assert uuid not in "".join(tkey)
+
+    def test_uuid_varying_round_trip(self):
+        import random
+        rng = random.Random(0)
+
+        def _uuid():
+            h = "%08x-%04x-%04x-%04x-%012x"
+            return h % (
+                rng.randint(0, 0xFFFFFFFF),
+                rng.randint(0, 0xFFFF),
+                rng.randint(0, 0xFFFF),
+                rng.randint(0, 0xFFFF),
+                rng.randint(0, 0xFFFFFFFFFFFF),
+            )
+
+        lines = [f"REQUEST id={_uuid()} status=200\n" for _ in range(50)]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_iso_datetime_round_trip(self):
+        lines = [
+            f"2024-01-15T{h:02d}:{m:02d}:{s:02d}Z INFO event={n}\n"
+            for n, (h, m, s) in enumerate(
+                (h, m % 60, s % 60)
+                for h in range(5)
+                for m in range(12)
+                for s in [0, 30]
+            )
+        ]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_iso_datetime_with_fractional_seconds(self):
+        lines = [f"2024-03-01T12:00:{i:02d}.{i*10:03d}Z METRIC value={i}\n" for i in range(30)]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_iso_datetime_with_offset_timezone(self):
+        lines = [f"2024-06-01T08:{i:02d}:00+05:30 INFO req={i}\n" for i in range(30)]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_ipv4_round_trip(self):
+        lines = [f"CONN src=192.168.1.{i} dst=10.0.0.1 port={1024+i}\n" for i in range(50)]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_ipv4_with_port_round_trip(self):
+        lines = [f"CONNECT 10.0.0.{i}:{8000+i} method=GET\n" for i in range(50)]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_ipv4_template_shared(self):
+        # Verify IPv4 is extracted as a single variable token.
+        from metacompressor.log_template import _tokenize
+        line = "CONN src=192.168.1.42 dst=10.0.0.1 port=8080"
+        tkey, values = _tokenize(line)
+        assert "192.168.1.42" in values, f"IPv4 should be extracted as one variable; got values={values}"
+        assert "10.0.0.1" in values
+
+    def test_hex_0x_round_trip(self):
+        lines = [f"ADDR ptr=0x{i:08X} val=0x{i*2:04x}\n" for i in range(50)]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_hex_0x_template_mode(self):
+        # Verify 0x-hex strings are extracted as single variable tokens.
+        from metacompressor.log_template import _tokenize
+        line = "ADDR ptr=0xDEADBEEF size=64"
+        tkey, values = _tokenize(line)
+        assert "0xDEADBEEF" in values, f"Hex 0x token should be extracted; got values={values}"
+        assert "0xDEADBEEF" not in "".join(tkey)
+
+    def test_url_round_trip(self):
+        paths = ["/api/v1", "/health", "/metrics", "/status", "/debug"]
+        lines = [f"GET https://example.com{paths[i % len(paths)]} 200\n" for i in range(50)]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_url_with_query_string_round_trip(self):
+        lines = [
+            f"GET https://api.example.com/search?q=term{i}&page={i % 5} 200\n"
+            for i in range(30)
+        ]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_number_still_extracted(self):
+        # Ensure plain numbers still work after tokenizer extension.
+        lines = [f"ERROR user={i} latency={i % 50}ms\n" for i in range(50)]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_mixed_token_types_round_trip(self):
+        uuid = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
+        lines = [
+            f"2024-01-{i+1:02d}T10:00:00Z REQUEST id={uuid} src=192.168.1.{i} "
+            f"ptr=0x{i:04x} status={200 + i % 3}\n"
+            for i in range(30)
+        ]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_timestamp_only_round_trip(self):
+        lines = [f"{h:02d}:{m:02d}:{s:02d} INFO ok\n"
+                 for h in range(3) for m in range(10) for s in range(2)]
+        data = "".join(lines).encode()
+        assert round_trip(data) == data
+
+    def test_determinism_with_extended_tokens(self):
+        uuid = "12345678-1234-1234-1234-123456789abc"
+        lines = [f"LOG id={uuid} ip=10.0.{i}.1 val={i}\n" for i in range(30)]
+        data = "".join(lines).encode()
+        assert compress_log(data) == compress_log(data)
+
+
+# ---------------------------------------------------------------------------
 # Determinism
 # ---------------------------------------------------------------------------
 
