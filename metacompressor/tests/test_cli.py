@@ -72,6 +72,10 @@ class TestCompareDirOutput:
 
         output = capsys.readouterr().out
         assert "MC template columnar" in output
+        assert "Structure v2 enabled" in output
+        assert "JSON lines detected" in output
+        assert "Reuse before" in output
+        assert "Fallback reasons" in output
         assert "Columnar enabled" in output
         assert "Columnar templates" in output
         assert "Encoded columns" in output
