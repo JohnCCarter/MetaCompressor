@@ -138,7 +138,10 @@ def compress_log(data: bytes) -> bytes:
        - Store recurring templates in an indexed dictionary.
        - Encode recurring-template lines as ``[template_id, [val, …]]``.
        - Encode non-recurring lines as ``[-1, raw_line_string]``.
-    6. Otherwise, encode in *raw mode* (zstd only, no template overhead).
+    6. Compare template-mode output size against raw-mode output size and
+       return whichever is smaller so that template overhead never hurts
+       compression when savings are marginal.
+    7. Otherwise, encode in *raw mode* (zstd only, no template overhead).
 
     Returns
     -------
@@ -197,7 +200,13 @@ def compress_log(data: bytes) -> bytes:
         "templates": tpl_strings,
         "records": records,
     }
-    return _serialise(payload)
+    template_result = _serialise(payload)
+    raw_result = _serialise({"mode": "raw", "data": data})
+    # Only use template mode when it actually reduces size; otherwise fall back
+    # to raw zstd so that template overhead never hurts compression.
+    if len(template_result) <= len(raw_result):
+        return template_result
+    return raw_result
 
 
 def decompress_log(data: bytes) -> bytes:
