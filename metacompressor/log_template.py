@@ -81,6 +81,10 @@ _VAR_RE = re.compile(
     r"("
     # UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    # Nginx/Apache access log timestamp: [DD/Mon/YYYY:HH:MM:SS ±ZZZZ]
+    # Captures the entire bracket as one token, avoiding spurious variable slots
+    # for the constant day/year/hour/timezone fields common in access logs.
+    r"|\[\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}\]"
     # ISO 8601 datetime (date+time separator required; timezone optional)
     r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
     # IPv4 address with optional :port (before plain numbers to avoid partial match)

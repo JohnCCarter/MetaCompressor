@@ -65,6 +65,10 @@ _VAR_RE = re.compile(
     r"("
     # UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    # Nginx/Apache access log timestamp: [DD/Mon/YYYY:HH:MM:SS ±ZZZZ]
+    # Captures the entire bracket as one token, avoiding spurious variable slots
+    # for the constant day/year/hour/timezone fields common in access logs.
+    r"|\[\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}\]"
     # ISO 8601 datetime (date+time separator required; timezone optional)
     r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
     # IPv4 address with optional :port (before plain numbers to avoid partial match)
@@ -184,7 +188,9 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
 
     all_files = sorted(p for p in input_dir.rglob("*") if p.is_file())
 
-    # --- first pass: decode files and collect all lines --------------------
+    # -----------------------------------------------------------------------
+    # Phase 1: file I/O – read and UTF-8-decode every file
+    # -----------------------------------------------------------------------
     t_extract_start = time.perf_counter()
 
     file_info: List[Tuple[str, Optional[List[str]], bytes]] = []
@@ -198,16 +204,39 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
         except UnicodeDecodeError:
             file_info.append((rel, None, raw))
 
-    # --- count template-key occurrences across *all* text files -----------
+    # -----------------------------------------------------------------------
+    # Phase 2: tokenise – one regex call per *unique* line
+    #
+    # tok_cache maps each unique line string to its (template_key, values)
+    # pair.  For highly repetitive corpora (e.g. a 10 MB file where every
+    # line is identical) this reduces O(N) regex splits to O(unique lines),
+    # typically just a handful.  The cache is local to this call so it is
+    # always GC'd when the function returns.
+    # -----------------------------------------------------------------------
+    tok_cache: Dict[str, Tuple[Tuple[str, ...], List[str]]] = {}
+
+    t_tokenize_start = time.perf_counter()
+    for _, lines, _ in file_info:
+        if lines is None:
+            continue
+        for line in lines:
+            if line not in tok_cache:
+                tok_cache[line] = _tokenize(line)
+    t_tokenize_s = time.perf_counter() - t_tokenize_start
+
+    # -----------------------------------------------------------------------
+    # Phase 3: count template-key occurrences + build shared dictionary
+    # -----------------------------------------------------------------------
+    t_count_start = time.perf_counter()
+
     tpl_count: Dict[Tuple[str, ...], int] = {}
     for _, lines, _ in file_info:
         if lines is None:
             continue
         for line in lines:
-            tkey, _ = _tokenize(line)
+            tkey = tok_cache[line][0]
             tpl_count[tkey] = tpl_count.get(tkey, 0) + 1
 
-    # --- build shared template dictionary ---------------------------------
     tpl_to_id: Dict[Tuple[str, ...], int] = {}
     tpl_strings: List[str] = []
     for tkey, cnt in tpl_count.items():
@@ -216,13 +245,18 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
                 tpl_to_id[tkey] = len(tpl_strings)
                 tpl_strings.append(_template_string(tkey))
 
-    # --- second pass: encode each file ------------------------------------
-    # Metrics accumulators
+    t_count_s = time.perf_counter() - t_count_start
+
+    # -----------------------------------------------------------------------
+    # Phase 4: encode each file using the shared dictionary + cache
+    # -----------------------------------------------------------------------
     total_lines = 0
     template_reuse_count = 0
     raw_fallback_lines = 0
     binary_fallback_files = 0
     total_var_slots = 0  # sum of variable counts across template-mode lines
+
+    t_encode_start = time.perf_counter()
 
     encoded_files: List[dict] = []
     for rel, lines, raw_bytes in file_info:
@@ -241,7 +275,7 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
         file_var_total = 0
         for line in lines:
             total_lines += 1
-            tkey, values = _tokenize(line)
+            tkey, values = tok_cache[line]  # always a cache hit
             if tkey in tpl_to_id:
                 records.append([tpl_to_id[tkey], values])
                 file_tpl_lines += 1
@@ -252,7 +286,7 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
 
         # Hybrid fallback: if no lines used template mode, store the file as
         # its original raw bytes to avoid per-line raw-record overhead.
-        # Use the already-read raw_bytes (preserved from first pass) so that
+        # Use the already-read raw_bytes (preserved from Phase 1) so that
         # the stored bytes are byte-for-byte identical to the original file.
         if file_tpl_lines == 0 and lines:
             binary_fallback_files += 1
@@ -267,9 +301,12 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
             total_var_slots += file_var_total
             encoded_files.append({"path": rel, "records": records})
 
+    t_encode_s = time.perf_counter() - t_encode_start
     t_extract_s = time.perf_counter() - t_extract_start
 
-    # --- serialise --------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Phase 5: serialise (msgpack) + compress (zstd)
+    # -----------------------------------------------------------------------
     t_serialize_start = time.perf_counter()
     payload = {"templates": tpl_strings, "files": encoded_files}
     raw_payload = msgpack.packb(payload, use_bin_type=True)
@@ -299,6 +336,9 @@ def compress_corpus_template_with_metrics(input_dir: Path) -> Tuple[bytes, dict]
         "avg_vars_per_tpl_line": avg_vars,
         "compressed_size": len(result),
         "timing": {
+            "tokenize_s": t_tokenize_s,
+            "count_s": t_count_s,
+            "encode_s": t_encode_s,
             "extract_s": t_extract_s,
             "serialize_s": t_serialize_s,
             "zstd_s": t_zstd_s,
