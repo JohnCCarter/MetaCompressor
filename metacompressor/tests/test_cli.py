@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from argparse import Namespace
+from pathlib import Path
+
 import pytest
 
-from metacompressor.cli import format_delta
+from metacompressor.cli import cmd_compare_dir, format_delta
 
 
 class TestFormatDelta:
@@ -56,3 +59,21 @@ class TestFormatDelta:
         result = format_delta(1001, 1000, "baseline")
         assert "LARGER" in result
         assert "1" in result
+
+
+class TestCompareDirOutput:
+    def test_compare_dir_includes_columnar_metrics(self, tmp_path, capsys):
+        corpus_dir = tmp_path / "corpus"
+        corpus_dir.mkdir()
+        (corpus_dir / "logs.log").write_bytes(
+            b"INFO seq=1 status=200\nINFO seq=2 status=200\n" * 80
+        )
+
+        cmd_compare_dir(Namespace(input_dir=str(corpus_dir)))
+
+        output = capsys.readouterr().out
+        assert "MC template columnar" in output
+        assert "Columnar enabled" in output
+        assert "Columnar templates" in output
+        assert "Encoded columns" in output
+        assert "Final selected mode" in output
