@@ -83,28 +83,36 @@ def _dataset_specs(include_500mb: bool) -> List[DatasetSpec]:
             dataset_type="structured scale 10MB",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(root, 10, seed=1001, files=8),
+            generator=lambda root: _generate_app_service_logs(
+                root, 10, seed=1001, files=8
+            ),
         ),
         DatasetSpec(
             name="structured_scale_50mb",
             dataset_type="structured scale 50MB",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(root, 50, seed=1002, files=12),
+            generator=lambda root: _generate_app_service_logs(
+                root, 50, seed=1002, files=12
+            ),
         ),
         DatasetSpec(
             name="structured_scale_100mb",
             dataset_type="structured scale 100MB",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(root, 100, seed=1003, files=16),
+            generator=lambda root: _generate_app_service_logs(
+                root, 100, seed=1003, files=16
+            ),
         ),
         DatasetSpec(
             name="app_service_logs",
             dataset_type="app/service logs",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(root, 12, seed=101, files=10),
+            generator=lambda root: _generate_app_service_logs(
+                root, 12, seed=101, files=10
+            ),
         ),
         DatasetSpec(
             name="json_ndjson_logs",
@@ -125,14 +133,18 @@ def _dataset_specs(include_500mb: bool) -> List[DatasetSpec]:
             dataset_type="mixed microservice logs",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_mixed_microservice_logs(root, 18, seed=404),
+            generator=lambda root: _generate_mixed_microservice_logs(
+                root, 18, seed=404
+            ),
         ),
         DatasetSpec(
             name="high_cardinality_logs",
             dataset_type="high-cardinality logs",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_high_cardinality_logs(root, 10, seed=505, files=6),
+            generator=lambda root: _generate_high_cardinality_logs(
+                root, 10, seed=505, files=6
+            ),
         ),
         DatasetSpec(
             name="noisy_low_structure_logs",
@@ -146,7 +158,9 @@ def _dataset_specs(include_500mb: bool) -> List[DatasetSpec]:
             dataset_type="many-small-files corpus",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_many_small_files(root, seed=909, files=5000),
+            generator=lambda root: _generate_many_small_files(
+                root, seed=909, files=5000
+            ),
         ),
     ]
     specs.append(
@@ -155,7 +169,9 @@ def _dataset_specs(include_500mb: bool) -> List[DatasetSpec]:
             dataset_type="structured scale 250MB",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(root, 250, seed=1004, files=24),
+            generator=lambda root: _generate_app_service_logs(
+                root, 250, seed=1004, files=24
+            ),
         )
     )
     if include_500mb:
@@ -165,17 +181,22 @@ def _dataset_specs(include_500mb: bool) -> List[DatasetSpec]:
                 dataset_type="structured scale 500MB",
                 realism="semi-realistic",
                 structured=True,
-                generator=lambda root: _generate_app_service_logs(root, 500, seed=1005, files=32),
+                generator=lambda root: _generate_app_service_logs(
+                    root, 500, seed=1005, files=32
+                ),
             )
         )
     return specs
 
 
-def _structured_edge_results(dataset_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _structured_edge_results(
+    dataset_results: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
     return [
         result
         for result in dataset_results
-        if result["name"] in _STRUCTURED_EDGE_DATASET_NAMES and not _dataset_skipped(result)
+        if result["name"] in _STRUCTURED_EDGE_DATASET_NAMES
+        and not _dataset_skipped(result)
     ]
 
 
@@ -187,7 +208,9 @@ def _completed_results(dataset_results: List[Dict[str, Any]]) -> List[Dict[str, 
     return [result for result in dataset_results if not _dataset_skipped(result)]
 
 
-def _required_scale_results(dataset_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _required_scale_results(
+    dataset_results: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
     return [
         result
         for result in dataset_results
@@ -196,7 +219,10 @@ def _required_scale_results(dataset_results: List[Dict[str, Any]]) -> List[Dict[
 
 
 def _skip_reason_for_spec(spec: DatasetSpec, available_memory_mb: int) -> Optional[str]:
-    if spec.name == "structured_scale_250mb" and available_memory_mb < _MIN_250MB_MEMORY_MB:
+    if (
+        spec.name == "structured_scale_250mb"
+        and available_memory_mb < _MIN_250MB_MEMORY_MB
+    ):
         return (
             "skipped: available memory at start (%d MB) below %d MB threshold for 250MB dataset"
             % (available_memory_mb, _MIN_250MB_MEMORY_MB)
@@ -219,7 +245,11 @@ def _measure_dataset_worker(
     try:
         _build_dataset(dataset_dir, spec)
         queue.put(
-            {"result": _finalize_dataset_result(_measure_dataset(dataset_dir, spec, work_dir))}
+            {
+                "result": _finalize_dataset_result(
+                    _measure_dataset(dataset_dir, spec, work_dir)
+                )
+            }
         )
     except ValidationError as exc:
         queue.put({"validation_error": str(exc)})
@@ -227,11 +257,17 @@ def _measure_dataset_worker(
         queue.put({"error": str(exc)})
 
 
-def _run_dataset_with_timeout(tmp_root: Path, spec: DatasetSpec, timeout_s: int) -> Dict[str, Any]:
+def _run_dataset_with_timeout(
+    tmp_root: Path, spec: DatasetSpec, timeout_s: int
+) -> Dict[str, Any]:
     dataset_dir = tmp_root / "datasets" / spec.name
     work_dir = tmp_root / "work" / spec.name
     work_dir.mkdir(parents=True, exist_ok=True)
-    ctx = multiprocessing.get_context("fork") if os.name == "posix" else multiprocessing.get_context()
+    ctx = (
+        multiprocessing.get_context("fork")
+        if os.name == "posix"
+        else multiprocessing.get_context()
+    )
     queue = ctx.Queue()
     process = ctx.Process(
         target=_measure_dataset_worker,
@@ -244,12 +280,15 @@ def _run_dataset_with_timeout(tmp_root: Path, spec: DatasetSpec, timeout_s: int)
         process.terminate()
         process.join()
         queue.close()
-        return _skipped_dataset_result(spec, "skipped: exceeded %ds time budget" % timeout_s)
+        return _skipped_dataset_result(
+            spec, "skipped: exceeded %ds time budget" % timeout_s
+        )
 
     if queue.empty():
         queue.close()
         raise RuntimeError(
-            "dataset %s failed without a result (exit code %s)" % (spec.name, process.exitcode)
+            "dataset %s failed without a result (exit code %s)"
+            % (spec.name, process.exitcode)
         )
 
     payload = queue.get()
@@ -317,12 +356,19 @@ def _reason_for_dataset(result: Dict[str, Any]) -> str:
     column_count = summary["column_count"]
     fallback_reasons = summary["fallback_reason_counts"]
     if summary["fallback_triggered"]:
-        return "fallback kept loss bounded (%s)" % json.dumps(fallback_reasons, sort_keys=True)
+        return "fallback kept loss bounded (%s)" % json.dumps(
+            fallback_reasons, sort_keys=True
+        )
     if delta_pct is not None and delta_pct <= -10.0:
         return "reuse=%s, columns=%d" % (_fmt_pct(reuse_pct), column_count)
     if fallback_reasons:
-        return "close to baseline; fallback reasons=%s" % json.dumps(fallback_reasons, sort_keys=True)
-    return "close to baseline; reuse=%s, columns=%d" % (_fmt_pct(reuse_pct), column_count)
+        return "close to baseline; fallback reasons=%s" % json.dumps(
+            fallback_reasons, sort_keys=True
+        )
+    return "close to baseline; reuse=%s, columns=%d" % (
+        _fmt_pct(reuse_pct),
+        column_count,
+    )
 
 
 def _remaining_weak_zones(dataset_results: List[Dict[str, Any]]) -> List[str]:
@@ -351,16 +397,15 @@ def _recommended_next_improvement(dataset_results: List[Dict[str, Any]]) -> str:
         return "No measured datasets completed; rerun once resource constraints are resolved."
     ranked = sorted(
         completed_results,
-        key=lambda result: result["mc_summary"]["delta_vs_tar_zstd_pct"]
-        if result["mc_summary"]["delta_vs_tar_zstd_pct"] is not None
-        else -999.0,
+        key=lambda result: (
+            result["mc_summary"]["delta_vs_tar_zstd_pct"]
+            if result["mc_summary"]["delta_vs_tar_zstd_pct"] is not None
+            else -999.0
+        ),
         reverse=True,
     )
     weakest = ranked[0]
-    return (
-        "Focus on %s next: %s."
-        % (weakest["name"], _reason_for_dataset(weakest))
-    )
+    return "Focus on %s next: %s." % (weakest["name"], _reason_for_dataset(weakest))
 
 
 def _build_final_verdict(dataset_results: List[Dict[str, Any]]) -> str:
@@ -372,7 +417,10 @@ def _build_final_verdict(dataset_results: List[Dict[str, Any]]) -> str:
         if _dataset_skipped(result)
     ]
     if skipped_required:
-        return "ACCEPTANCE_HARDENING_PARTIAL Reason: skipped required scale datasets: %s" % ", ".join(skipped_required)
+        return (
+            "ACCEPTANCE_HARDENING_PARTIAL Reason: skipped required scale datasets: %s"
+            % ", ".join(skipped_required)
+        )
     strong_wins = [
         result
         for result in structured_results
@@ -395,7 +443,9 @@ def _build_final_verdict(dataset_results: List[Dict[str, Any]]) -> str:
     return "ACCEPTANCE_HARDENING_VALIDATED"
 
 
-def _build_markdown_report(dataset_results: List[Dict[str, Any]], final_verdict: str) -> str:
+def _build_markdown_report(
+    dataset_results: List[Dict[str, Any]], final_verdict: str
+) -> str:
     completed_results = _completed_results(dataset_results)
     lines = [
         "# MetaCompressor Acceptance Hardening Report",
@@ -458,7 +508,9 @@ def _build_markdown_report(dataset_results: List[Dict[str, Any]], final_verdict:
         for result in completed_results
         if result["mc_summary"]["fallback_triggered"]
     ]
-    skipped_results = [result["name"] for result in dataset_results if _dataset_skipped(result)]
+    skipped_results = [
+        result["name"] for result in dataset_results if _dataset_skipped(result)
+    ]
     peak_dataset = None
     slowest_dataset = None
     if completed_results:
@@ -477,10 +529,13 @@ def _build_markdown_report(dataset_results: List[Dict[str, Any]], final_verdict:
         "",
         "- Structured strong wins (>=10%% vs TAR+ZSTD): %d/%d"
         % (len(strong_wins), len(structured_results)),
-        "- Strong-win datasets: %s" % (", ".join(strong_wins) if strong_wins else "none"),
+        "- Strong-win datasets: %s"
+        % (", ".join(strong_wins) if strong_wins else "none"),
         "- Sub-10%% wins: %s" % (", ".join(near_wins) if near_wins else "none"),
-        "- Final fallback selections: %s" % (", ".join(fallbacks) if fallbacks else "none"),
-        "- Skipped datasets: %s" % (", ".join(skipped_results) if skipped_results else "none"),
+        "- Final fallback selections: %s"
+        % (", ".join(fallbacks) if fallbacks else "none"),
+        "- Skipped datasets: %s"
+        % (", ".join(skipped_results) if skipped_results else "none"),
         "",
         "## Speed/memory summary",
         "",
@@ -532,7 +587,9 @@ def _build_markdown_report(dataset_results: List[Dict[str, Any]], final_verdict:
     return "\n".join(lines)
 
 
-def run_validation(output_dir: Optional[Path] = None, include_500mb: Optional[bool] = None) -> Dict[str, Any]:
+def run_validation(
+    output_dir: Optional[Path] = None, include_500mb: Optional[bool] = None
+) -> Dict[str, Any]:
     if include_500mb is None:
         include_500mb = _large_tests_enabled()
 
@@ -555,8 +612,12 @@ def run_validation(output_dir: Optional[Path] = None, include_500mb: Optional[bo
         "available_memory_mb_at_start": available_memory_mb,
         "include_500mb": include_500mb,
         "datasets": dataset_results,
-        "correctness_passed": all(result["correctness_status"] == "passed" for result in completed_results),
-        "determinism_passed": all(result["determinism_status"] == "passed" for result in completed_results),
+        "correctness_passed": all(
+            result["correctness_status"] == "passed" for result in completed_results
+        ),
+        "determinism_passed": all(
+            result["determinism_status"] == "passed" for result in completed_results
+        ),
         "remaining_weak_zones": _remaining_weak_zones(dataset_results),
         "recommended_next_improvement": _recommended_next_improvement(dataset_results),
         "final_verdict": final_verdict,
@@ -565,7 +626,9 @@ def run_validation(output_dir: Optional[Path] = None, include_500mb: Optional[bo
     if output_dir is None:
         output_dir = _RESULTS_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / _JSON_PATH.name).write_text(_json_dumps(payload) + "\n", encoding="utf-8")
+    (output_dir / _JSON_PATH.name).write_text(
+        _json_dumps(payload) + "\n", encoding="utf-8"
+    )
     (output_dir / _MARKDOWN_PATH.name).write_text(
         _build_markdown_report(dataset_results, final_verdict) + "\n",
         encoding="utf-8",
@@ -574,7 +637,9 @@ def run_validation(output_dir: Optional[Path] = None, include_500mb: Optional[bo
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run MetaCompressor acceptance hardening validation.")
+    parser = argparse.ArgumentParser(
+        description="Run MetaCompressor acceptance hardening validation."
+    )
     parser.add_argument(
         "--output-dir",
         default=str(_RESULTS_DIR),
@@ -600,7 +665,10 @@ def main() -> None:
             + "\n",
             encoding="utf-8",
         )
-        _MARKDOWN_PATH.write_text("# MetaCompressor Acceptance Hardening Report\n\n%s\n" % message, encoding="utf-8")
+        _MARKDOWN_PATH.write_text(
+            "# MetaCompressor Acceptance Hardening Report\n\n%s\n" % message,
+            encoding="utf-8",
+        )
         print(message)
         raise SystemExit(1)
     except Exception as exc:
@@ -619,7 +687,10 @@ def main() -> None:
             + "\n",
             encoding="utf-8",
         )
-        _MARKDOWN_PATH.write_text("# MetaCompressor Acceptance Hardening Report\n\n%s\n" % message, encoding="utf-8")
+        _MARKDOWN_PATH.write_text(
+            "# MetaCompressor Acceptance Hardening Report\n\n%s\n" % message,
+            encoding="utf-8",
+        )
         print(message)
         raise
 
