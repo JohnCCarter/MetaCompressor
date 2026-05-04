@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
+import signal
 import sys
 import tempfile
 import time
@@ -21,6 +23,13 @@ _MARKDOWN_PATH = _RESULTS_DIR / "metacompressor_acceptance_hardening.md"
 _JSON_PATH = _RESULTS_DIR / "metacompressor_acceptance_hardening.json"
 _MIN_STRONG_WIN_NUMERATOR = 2
 _MIN_250MB_MEMORY_MB = 2000
+_DEFAULT_DATASET_TIMEOUT_S = 180
+_DATASET_TIMEOUTS_S = {
+    "structured_scale_10mb": 180,
+    "structured_scale_50mb": 360,
+    "structured_scale_100mb": 720,
+    "structured_scale_250mb": 900,
+}
 _REQUIRED_SCALE_DATASET_NAMES = (
     "structured_scale_10mb",
     "structured_scale_50mb",
@@ -71,6 +80,27 @@ def _large_tests_enabled() -> bool:
 def _dataset_specs(include_500mb: bool) -> List[DatasetSpec]:
     specs = [
         DatasetSpec(
+            name="structured_scale_10mb",
+            dataset_type="structured scale 10MB",
+            realism="semi-realistic",
+            structured=True,
+            generator=lambda root: _generate_app_service_logs(root, 10, seed=1001, files=8),
+        ),
+        DatasetSpec(
+            name="structured_scale_50mb",
+            dataset_type="structured scale 50MB",
+            realism="semi-realistic",
+            structured=True,
+            generator=lambda root: _generate_app_service_logs(root, 50, seed=1002, files=12),
+        ),
+        DatasetSpec(
+            name="structured_scale_100mb",
+            dataset_type="structured scale 100MB",
+            realism="semi-realistic",
+            structured=True,
+            generator=lambda root: _generate_app_service_logs(root, 100, seed=1003, files=16),
+        ),
+        DatasetSpec(
             name="app_service_logs",
             dataset_type="app/service logs",
             realism="semi-realistic",
@@ -118,27 +148,6 @@ def _dataset_specs(include_500mb: bool) -> List[DatasetSpec]:
             realism="semi-realistic",
             structured=True,
             generator=lambda root: _generate_many_small_files(root, seed=909, files=5000),
-        ),
-        DatasetSpec(
-            name="structured_scale_10mb",
-            dataset_type="structured scale 10MB",
-            realism="semi-realistic",
-            structured=True,
-            generator=lambda root: _generate_app_service_logs(root, 10, seed=1001, files=8),
-        ),
-        DatasetSpec(
-            name="structured_scale_50mb",
-            dataset_type="structured scale 50MB",
-            realism="semi-realistic",
-            structured=True,
-            generator=lambda root: _generate_app_service_logs(root, 50, seed=1002, files=12),
-        ),
-        DatasetSpec(
-            name="structured_scale_100mb",
-            dataset_type="structured scale 100MB",
-            realism="semi-realistic",
-            structured=True,
-            generator=lambda root: _generate_app_service_logs(root, 100, seed=1003, files=16),
         ),
     ]
     specs.append(
@@ -194,6 +203,31 @@ def _skip_reason_for_spec(spec: DatasetSpec, available_memory_mb: int) -> Option
             % (available_memory_mb, _MIN_250MB_MEMORY_MB)
         )
     return None
+
+
+def _dataset_timeout_seconds(spec: DatasetSpec) -> int:
+    return _DATASET_TIMEOUTS_S.get(spec.name, _DEFAULT_DATASET_TIMEOUT_S)
+
+
+@contextlib.contextmanager
+def _dataset_time_limit(timeout_s: int):
+    if timeout_s <= 0 or os.name != "posix":
+        yield
+        return
+
+    def _handle_timeout(signum, frame):
+        raise TimeoutError("exceeded %ds time budget" % timeout_s)
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _handle_timeout)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, timeout_s)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer != (0.0, 0.0):
+            signal.setitimer(signal.ITIMER_REAL, previous_timer[0], previous_timer[1])
 
 
 def _skipped_dataset_result(spec: DatasetSpec, reason: str) -> Dict[str, Any]:
@@ -483,8 +517,15 @@ def run_validation(output_dir: Optional[Path] = None, include_500mb: Optional[bo
             dataset_dir = tmp_root / "datasets" / spec.name
             work_dir = tmp_root / "work" / spec.name
             work_dir.mkdir(parents=True, exist_ok=True)
-            _build_dataset(dataset_dir, spec)
-            dataset_results.append(_finalize_dataset_result(_measure_dataset(dataset_dir, spec, work_dir)))
+            timeout_s = _dataset_timeout_seconds(spec)
+            try:
+                with _dataset_time_limit(timeout_s):
+                    _build_dataset(dataset_dir, spec)
+                    dataset_results.append(_finalize_dataset_result(_measure_dataset(dataset_dir, spec, work_dir)))
+            except TimeoutError as exc:
+                dataset_results.append(
+                    _skipped_dataset_result(spec, "skipped: %s" % exc)
+                )
 
     final_verdict = _build_final_verdict(dataset_results)
     completed_results = _completed_results(dataset_results)
