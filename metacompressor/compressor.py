@@ -5,13 +5,13 @@ from __future__ import annotations
 from metacompressor.container import MC1Container, serialise
 from metacompressor.delta import delta_encoded_size, find_similar_chunk
 from metacompressor.utils import (
-    CHUNK_SIZE,
-    CDC_MIN_CHUNK_SIZE,
     CDC_AVG_CHUNK_SIZE,
-    CDC_MAX_CHUNK_SIZE,
     CDC_MASK,
-    chunk_data,
+    CDC_MAX_CHUNK_SIZE,
+    CDC_MIN_CHUNK_SIZE,
+    CHUNK_SIZE,
     cdc_chunk_data,
+    chunk_data,
     hash_chunk,
 )
 
@@ -58,8 +58,9 @@ def compress(
     6. Serialise the container and compress with Zstandard.
     """
     if chunking_mode not in (CHUNKING_FIXED, CHUNKING_CDC):
-        raise ValueError(f"Unknown chunking_mode: {chunking_mode!r}. "
-                         f"Expected 'fixed' or 'cdc'.")
+        raise ValueError(
+            f"Unknown chunking_mode: {chunking_mode!r}. Expected 'fixed' or 'cdc'."
+        )
 
     hash_to_id: dict[str, int] = {}
     container = MC1Container(

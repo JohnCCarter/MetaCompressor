@@ -40,7 +40,7 @@ TEMPLATE_MODE_VALIDATE
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import msgpack
 import zstandard as zstd
@@ -156,6 +156,7 @@ def _reconstruct_line(template_str: str, values: List[str]) -> str:
 # Compress / decompress
 # ---------------------------------------------------------------------------
 
+
 def compress_log(data: bytes) -> bytes:
     """Compress *data* using log template extraction.
 
@@ -203,9 +204,7 @@ def compress_log(data: bytes) -> bytes:
         tpl_count[tkey] = tpl_count.get(tkey, 0) + 1
 
     # --- decide mode -------------------------------------------------------
-    any_recurring = any(
-        cnt >= _MIN_TEMPLATE_OCCURRENCES for cnt in tpl_count.values()
-    )
+    any_recurring = any(cnt >= _MIN_TEMPLATE_OCCURRENCES for cnt in tpl_count.values())
     if not any_recurring:
         return _serialise({"mode": "raw", "data": data})
 
@@ -295,6 +294,7 @@ def get_compress_mode(compressed: bytes) -> str:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _serialise(payload: dict) -> bytes:
     """Pack *payload* with msgpack, compress with zstd, prepend header."""

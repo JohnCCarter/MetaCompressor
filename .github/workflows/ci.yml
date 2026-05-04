@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  layout-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Repository layout
+        run: python scripts/check_repo_layout.py
+
+      - name: Install package and dev tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Ruff lint
+        run: ruff check metacompressor scripts benchmarks
+
+      # Black is the canonical formatter in CI. Ruff's formatter can disagree on edge cases;
+      # do not add `ruff format --check` here unless you align both tools project-wide.
+      - name: Black (format check)
+        run: black --check metacompressor scripts benchmarks
+
+      - name: Pytest
+        run: python -m pytest metacompressor/tests -q --tb=short

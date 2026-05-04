@@ -1,1 +1,0 @@
-MetaCompressor is a deterministic lossless compressor using chunking, deduplication, and Zstandard. It produces identical output for identical input.

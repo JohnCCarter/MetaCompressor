@@ -90,9 +90,10 @@ import io
 import re
 import tarfile
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import msgpack
 import zstandard as zstd
@@ -301,7 +302,7 @@ def _json_collect_leaves(
         while True:
             key_start = _json_skip_ws(text, index)
             key_end = _json_parse_string(text, key_start)
-            key = text[key_start + 1:key_end - 1]
+            key = text[key_start + 1 : key_end - 1]
             index = _json_skip_ws(text, key_end)
             if index >= len(text) or text[index] != ":":
                 raise ValueError("expected ':' in JSON object")
@@ -334,7 +335,13 @@ def _json_collect_leaves(
     if text[index] == '"':
         end = _json_parse_string(text, index)
         return end, [
-            _JsonLeaf(path=path, raw_value=text[index:end], start=index, end=end, kind="json_string")
+            _JsonLeaf(
+                path=path,
+                raw_value=text[index:end],
+                start=index,
+                end=end,
+                kind="json_string",
+            )
         ]
 
     literal_map = {
@@ -346,12 +353,24 @@ def _json_collect_leaves(
         if text.startswith(literal, index):
             end = index + len(literal)
             return end, [
-                _JsonLeaf(path=path, raw_value=text[index:end], start=index, end=end, kind=kind)
+                _JsonLeaf(
+                    path=path,
+                    raw_value=text[index:end],
+                    start=index,
+                    end=end,
+                    kind=kind,
+                )
             ]
 
     end = _json_parse_number(text, index)
     return end, [
-        _JsonLeaf(path=path, raw_value=text[index:end], start=index, end=end, kind="json_number")
+        _JsonLeaf(
+            path=path,
+            raw_value=text[index:end],
+            start=index,
+            end=end,
+            kind="json_number",
+        )
     ]
 
 
@@ -385,7 +404,7 @@ def _analyze_json_line(line: str) -> Optional[_LineAnalysis]:
     structure_bits: List[str] = []
     last = 0
     for leaf in leaves:
-        parts.append(line[last:leaf.start])
+        parts.append(line[last : leaf.start])
         values.append(leaf.raw_value)
         value_kinds.append(leaf.kind)
         structure_bits.append("%s=%s" % (".".join(leaf.path), leaf.kind))
@@ -424,8 +443,10 @@ def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]
         if match is None:
             continue
         candidate = (match.start(), match.end(), kind)
-        if best is None or candidate[0] < best[0] or (
-            candidate[0] == best[0] and candidate[1] > best[1]
+        if (
+            best is None
+            or candidate[0] < best[0]
+            or (candidate[0] == best[0] and candidate[1] > best[1])
         ):
             best = candidate
 
@@ -531,7 +552,9 @@ def _pack_archive_payload(payload: dict, level: int = _ZSTD_LEVEL) -> bytes:
 def _build_tarzstd_bytes(input_dir: Path, all_files: List[Path]) -> bytes:
     """Return a TAR+ZSTD baseline archive for *all_files*."""
     output = io.BytesIO()
-    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(output, closefd=False) as compressor:
+    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
+        output, closefd=False
+    ) as compressor:
         with tarfile.open(fileobj=compressor, mode="w|") as tar:
             for file_path in all_files:
                 info = tarfile.TarInfo(name=file_path.relative_to(input_dir).as_posix())
@@ -649,10 +672,13 @@ def _is_delta_friendly(values: List[int]) -> bool:
         return False
     deltas = [values[i] - values[i - 1] for i in range(1, len(values))]
     delta_count = len(deltas)
-    monotonic_ratio = max(
-        sum(1 for delta in deltas if delta >= 0),
-        sum(1 for delta in deltas if delta <= 0),
-    ) / delta_count
+    monotonic_ratio = (
+        max(
+            sum(1 for delta in deltas if delta >= 0),
+            sum(1 for delta in deltas if delta <= 0),
+        )
+        / delta_count
+    )
     small_step_ratio = sum(1 for delta in deltas if abs(delta) <= 16) / delta_count
     return monotonic_ratio >= 0.9 or small_step_ratio >= 0.9
 
@@ -739,11 +765,16 @@ def _decode_column(column: dict, expected_count: int) -> List[str]:
         if len(values) != expected_count:
             raise ValueError("Corrupt column encoding: raw column length mismatch")
         if any(not isinstance(value, str) for value in values):
-            raise ValueError("Corrupt column encoding: raw column contains non-string values")
+            raise ValueError(
+                "Corrupt column encoding: raw column contains non-string values"
+            )
         return values
 
     if encoding == _ENCODING_VARINT:
-        return [str(value) for value in _decode_signed_varints(bytes(column["data"]), expected_count)]
+        return [
+            str(value)
+            for value in _decode_signed_varints(bytes(column["data"]), expected_count)
+        ]
 
     if encoding == _ENCODING_DELTA:
         deltas = _decode_signed_varints(bytes(column["data"]), expected_count)
@@ -763,7 +794,9 @@ def _decode_column(column: dict, expected_count: int) -> List[str]:
         try:
             return [dictionary[index] for index in indices]
         except IndexError as exc:
-            raise ValueError("Corrupt column encoding: dictionary index out of range") from exc
+            raise ValueError(
+                "Corrupt column encoding: dictionary index out of range"
+            ) from exc
 
     if encoding == _ENCODING_RLE:
         values = [
@@ -882,7 +915,9 @@ def _build_row_template_archive(
     output.write(MAGIC + bytes([VERSION]))
     packer = msgpack.Packer(use_bin_type=True)
 
-    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(output, closefd=False) as compressor:
+    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
+        output, closefd=False
+    ) as compressor:
         compressor.write(packer.pack_map_header(2))
         compressor.write(packer.pack("templates"))
         compressor.write(packer.pack(tpl_strings))
@@ -894,7 +929,9 @@ def _build_row_template_archive(
             if is_binary:
                 raw = file_path.read_bytes()
                 binary_fallback_files += 1
-                fallback_reason_counts["binary"] = fallback_reason_counts.get("binary", 0) + 1
+                fallback_reason_counts["binary"] = (
+                    fallback_reason_counts.get("binary", 0) + 1
+                )
                 compressor.write(packer.pack({"path": rel, "records": [[-2, raw]]}))
                 continue
 
@@ -916,9 +953,8 @@ def _build_row_template_archive(
                 file_tpl_lines / file_total_lines if file_total_lines > 0 else 0.0
             )
             if (
-                (file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE)
-                and file_total_lines > 0
-            ):
+                file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE
+            ) and file_total_lines > 0:
                 raw = file_path.read_bytes()
                 binary_fallback_files += 1
                 if file_tpl_lines > 0:
@@ -1010,7 +1046,9 @@ def _pack_columnar_archive(
     output.write(MAGIC + bytes([VERSION]))
     packer = msgpack.Packer(use_bin_type=True)
 
-    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(output, closefd=False) as compressor:
+    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
+        output, closefd=False
+    ) as compressor:
         compressor.write(packer.pack_map_header(6))
         compressor.write(packer.pack("mode"))
         compressor.write(packer.pack(mode))
@@ -1070,7 +1108,9 @@ def _build_columnar_template_archive(
             raw = file_path.read_bytes()
             raw_files.append(raw)
             binary_fallback_files += 1
-            fallback_reason_counts["binary"] = fallback_reason_counts.get("binary", 0) + 1
+            fallback_reason_counts["binary"] = (
+                fallback_reason_counts.get("binary", 0) + 1
+            )
             continue
 
         file_tpl_lines = 0
@@ -1093,9 +1133,8 @@ def _build_columnar_template_archive(
             file_tpl_lines / file_total_lines if file_total_lines > 0 else 0.0
         )
         if (
-            (file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE)
-            and file_total_lines > 0
-        ):
+            file_tpl_lines == 0 or file_template_rate < _MIN_FILE_TEMPLATE_RATE
+        ) and file_total_lines > 0:
             files_payload.append(
                 {"path": rel, "kind": "raw", "raw_file_id": len(raw_files)}
             )
@@ -1114,7 +1153,9 @@ def _build_columnar_template_archive(
             raw_fallback_lines += file_raw_lines
             continue
 
-        files_payload.append({"path": rel, "kind": "text", "num_lines": file_total_lines})
+        files_payload.append(
+            {"path": rel, "kind": "text", "num_lines": file_total_lines}
+        )
         template_reuse_count += file_tpl_lines
         raw_fallback_lines += file_raw_lines
         total_var_slots += file_var_total
@@ -1207,13 +1248,16 @@ def _template_reuse_rate(
     """Return the share of lines participating in a recurring template."""
     if total_lines <= 0:
         return 0.0
-    reuse_count = sum(count for count in tpl_count.values() if count >= _MIN_TEMPLATE_OCCURRENCES)
+    reuse_count = sum(
+        count for count in tpl_count.values() if count >= _MIN_TEMPLATE_OCCURRENCES
+    )
     return reuse_count / total_lines
 
 
 # ---------------------------------------------------------------------------
 # Compress / decompress
 # ---------------------------------------------------------------------------
+
 
 def compress_corpus_template(
     input_dir: Path,
@@ -1356,7 +1400,9 @@ def compress_corpus_template_with_metrics(
                 if line not in legacy_tok_cache:
                     legacy_tok_cache[line] = _tokenize_legacy(line)
                 legacy_tkey = legacy_tok_cache[line][0]
-                file_legacy_tpl_count[legacy_tkey] = file_legacy_tpl_count.get(legacy_tkey, 0) + 1
+                file_legacy_tpl_count[legacy_tkey] = (
+                    file_legacy_tpl_count.get(legacy_tkey, 0) + 1
+                )
 
                 if line not in tok_cache:
                     tok_cache[line] = (
@@ -1370,7 +1416,9 @@ def compress_corpus_template_with_metrics(
                                 tuple("legacy" for _ in legacy_tok_cache[line][1]),
                                 (),
                             ),
-                            value_kinds=tuple("legacy" for _ in legacy_tok_cache[line][1]),
+                            value_kinds=tuple(
+                                "legacy" for _ in legacy_tok_cache[line][1]
+                            ),
                             is_json=False,
                             json_structure_key=(),
                         )
@@ -1475,7 +1523,9 @@ def compress_corpus_template_with_metrics(
         final_selected_mode = _MODE_RAW_TAR_ZSTD
         chose_raw_fallback = True
         fallback_reason_counts = dict(row_stats["fallback_reason_counts"])
-        fallback_reason_counts["raw_tar_zstd"] = fallback_reason_counts.get("raw_tar_zstd", 0) + 1
+        fallback_reason_counts["raw_tar_zstd"] = (
+            fallback_reason_counts.get("raw_tar_zstd", 0) + 1
+        )
     else:
         result = best_template_result
         final_selected_mode = best_template_mode
@@ -1636,8 +1686,7 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
                 row_refs = _decode_row_refs(block["row_refs"])
                 row_count = len(row_refs)
                 decoded_columns = [
-                    _decode_column(column, row_count)
-                    for column in block["columns"]
+                    _decode_column(column, row_count) for column in block["columns"]
                 ]
                 for row_index, row_ref in enumerate(row_refs):
                     file_id, line_index = row_ref
@@ -1647,7 +1696,9 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
                     ]
                     lines = file_lines[file_id]
                     if lines is None:
-                        raise ValueError("Corrupt columnar archive: template row for raw file")
+                        raise ValueError(
+                            "Corrupt columnar archive: template row for raw file"
+                        )
                     lines[line_index] = _reconstruct_line(templates[tpl_id], values)
 
         for file_id, file_entry in enumerate(files):
@@ -1657,9 +1708,13 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
             else:
                 lines = file_lines[file_id]
                 if lines is None:
-                    raise ValueError("Corrupt columnar archive: incomplete file reconstruction")
+                    raise ValueError(
+                        "Corrupt columnar archive: incomplete file reconstruction"
+                    )
                 if any(line is None for line in lines):
-                    raise ValueError("Corrupt columnar archive: incomplete file reconstruction")
+                    raise ValueError(
+                        "Corrupt columnar archive: incomplete file reconstruction"
+                    )
                 file_bytes = "\n".join(lines).encode("utf-8")
 
             out_path = output_dir / rel_path

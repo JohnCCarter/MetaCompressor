@@ -59,9 +59,21 @@ _MESSAGES = [
 ]
 
 _CONFIG_KEYS = [
-    "host", "port", "max_connections", "timeout_ms", "retry_count",
-    "log_level", "enable_tls", "cert_path", "key_path", "ca_path",
-    "database_url", "redis_url", "queue_url", "metrics_port", "debug",
+    "host",
+    "port",
+    "max_connections",
+    "timeout_ms",
+    "retry_count",
+    "log_level",
+    "enable_tls",
+    "cert_path",
+    "key_path",
+    "ca_path",
+    "database_url",
+    "redis_url",
+    "queue_url",
+    "metrics_port",
+    "debug",
 ]
 
 
@@ -78,8 +90,7 @@ def _make_log_line(ts_sec: int, line_num: int) -> str:
     service = _RNG.choice(_SERVICES)
     msg_tpl = _RNG.choice(_MESSAGES)
     msg = (
-        msg_tpl
-        .replace("{ms}", str(_RNG.randint(1, 500)))
+        msg_tpl.replace("{ms}", str(_RNG.randint(1, 500)))
         .replace("{key}", _rand_key())
         .replace("{n}", str(_RNG.randint(1, 5)))
         .replace("{job}", f"job-{_RNG.randint(1000, 9999)}")
@@ -101,33 +112,41 @@ def _make_json_log(records: int = 200) -> bytes:
     entries = []
     ts = _RNG.randint(0, 86399 - records)
     for i in range(records):
-        entries.append(json.dumps({
-            "timestamp": f"2024-01-15T{(ts + i) // 3600:02d}:{((ts + i) % 3600) // 60:02d}:{(ts + i) % 60:02d}Z",
-            "level": _RNG.choice(_LOG_LEVELS),
-            "service": _RNG.choice(_SERVICES),
-            "message": _RNG.choice(_MESSAGES).replace("{ms}", str(_RNG.randint(1, 500)))
-                                              .replace("{key}", _rand_key())
-                                              .replace("{n}", str(_RNG.randint(1, 5)))
-                                              .replace("{job}", f"job-{_RNG.randint(1000, 9999)}")
-                                              .replace("{ip}", _rand_ip()),
-            "request_id": f"{_rand_key(8)}-{_rand_key(4)}-{_rand_key(4)}",
-            "duration_ms": _RNG.randint(1, 2000),
-            "status_code": _RNG.choice([200, 200, 200, 201, 400, 404, 500]),
-        }))
+        entries.append(
+            json.dumps(
+                {
+                    "timestamp": f"2024-01-15T{(ts + i) // 3600:02d}:{((ts + i) % 3600) // 60:02d}:{(ts + i) % 60:02d}Z",
+                    "level": _RNG.choice(_LOG_LEVELS),
+                    "service": _RNG.choice(_SERVICES),
+                    "message": _RNG.choice(_MESSAGES)
+                    .replace("{ms}", str(_RNG.randint(1, 500)))
+                    .replace("{key}", _rand_key())
+                    .replace("{n}", str(_RNG.randint(1, 5)))
+                    .replace("{job}", f"job-{_RNG.randint(1000, 9999)}")
+                    .replace("{ip}", _rand_ip()),
+                    "request_id": f"{_rand_key(8)}-{_rand_key(4)}-{_rand_key(4)}",
+                    "duration_ms": _RNG.randint(1, 2000),
+                    "status_code": _RNG.choice([200, 200, 200, 201, 400, 404, 500]),
+                }
+            )
+        )
     return "\n".join(entries).encode()
 
 
 def _make_config(service_name: str) -> bytes:
     """Structured config file (JSON-like)."""
-    cfg = {k: _RNG.choice([True, False, str(_RNG.randint(1, 9999)), _rand_key()])
-           for k in _CONFIG_KEYS}
+    cfg = {
+        k: _RNG.choice([True, False, str(_RNG.randint(1, 9999)), _rand_key()])
+        for k in _CONFIG_KEYS
+    }
     cfg["service"] = service_name
     cfg["version"] = f"1.{_RNG.randint(0, 9)}.{_RNG.randint(0, 20)}"
     return json.dumps(cfg, indent=2).encode()
 
 
-def generate_corpus(root: Path, num_log_files: int = 20, num_json_files: int = 10,
-                    num_configs: int = 5) -> None:
+def generate_corpus(
+    root: Path, num_log_files: int = 20, num_json_files: int = 10, num_configs: int = 5
+) -> None:
     """Write a realistic corpus under *root*."""
     logs_dir = root / "logs"
     json_dir = root / "json_logs"
@@ -203,12 +222,13 @@ def measure_mc_corpus(corpus_dir: Path, use_delta: bool = True) -> tuple[int, fl
 # Reporting
 # ---------------------------------------------------------------------------
 
+
 def _fmt_size(n: int) -> str:
     if n < 1024:
         return f"{n} B"
-    if n < 1024 ** 2:
+    if n < 1024**2:
         return f"{n / 1024:.1f} KB"
-    return f"{n / 1024 ** 2:.2f} MB"
+    return f"{n / 1024**2:.2f} MB"
 
 
 def _fmt_delta(mc: int, baseline: int) -> str:
@@ -251,13 +271,25 @@ def run_benchmark(corpus_dir: Path) -> None:
     col_w = 32
     print()
     print("=" * 76)
-    print(f"{'Method':<{col_w}} {'Size':>10} {'Ratio':>8} {'Time':>8}  Delta vs TAR+ZSTD")
+    print(
+        f"{'Method':<{col_w}} {'Size':>10} {'Ratio':>8} {'Time':>8}  Delta vs TAR+ZSTD"
+    )
     print("-" * 76)
-    print(f"{'Raw (uncompressed)':<{col_w}} {_fmt_size(raw_size):>10} {'1.00x':>8} {'—':>8}  —")
-    print(f"{'ZSTD per file':<{col_w}} {_fmt_size(zstd_size):>10} {ratio(zstd_size):>8} {zstd_time:>7.3f}s  {_fmt_delta(zstd_size, tar_size)}")
-    print(f"{'TAR + ZSTD (baseline)':<{col_w}} {_fmt_size(tar_size):>10} {ratio(tar_size):>8} {tar_time:>7.3f}s  (baseline)")
-    print(f"{'MC compress-dir (no delta)':<{col_w}} {_fmt_size(mc_nd_size):>10} {ratio(mc_nd_size):>8} {mc_nd_time:>7.3f}s  {_fmt_delta(mc_nd_size, tar_size)}")
-    print(f"{'MC compress-dir (+ delta)':<{col_w}} {_fmt_size(mc_delta_size):>10} {ratio(mc_delta_size):>8} {mc_delta_time:>7.3f}s  {_fmt_delta(mc_delta_size, tar_size)}")
+    print(
+        f"{'Raw (uncompressed)':<{col_w}} {_fmt_size(raw_size):>10} {'1.00x':>8} {'—':>8}  —"
+    )
+    print(
+        f"{'ZSTD per file':<{col_w}} {_fmt_size(zstd_size):>10} {ratio(zstd_size):>8} {zstd_time:>7.3f}s  {_fmt_delta(zstd_size, tar_size)}"
+    )
+    print(
+        f"{'TAR + ZSTD (baseline)':<{col_w}} {_fmt_size(tar_size):>10} {ratio(tar_size):>8} {tar_time:>7.3f}s  (baseline)"
+    )
+    print(
+        f"{'MC compress-dir (no delta)':<{col_w}} {_fmt_size(mc_nd_size):>10} {ratio(mc_nd_size):>8} {mc_nd_time:>7.3f}s  {_fmt_delta(mc_nd_size, tar_size)}"
+    )
+    print(
+        f"{'MC compress-dir (+ delta)':<{col_w}} {_fmt_size(mc_delta_size):>10} {ratio(mc_delta_size):>8} {mc_delta_time:>7.3f}s  {_fmt_delta(mc_delta_size, tar_size)}"
+    )
     print("=" * 76)
 
     delta_gain_bytes = mc_nd_size - mc_delta_size
@@ -266,9 +298,13 @@ def run_benchmark(corpus_dir: Path) -> None:
     print()
     print("--- Delta encoding impact ---")
     if delta_gain_bytes > 0:
-        print(f"  Delta saves {_fmt_size(delta_gain_bytes)} ({delta_gain_pct:.1f}%) over MC (no delta)")
+        print(
+            f"  Delta saves {_fmt_size(delta_gain_bytes)} ({delta_gain_pct:.1f}%) over MC (no delta)"
+        )
     elif delta_gain_bytes < 0:
-        print(f"  Delta adds {_fmt_size(-delta_gain_bytes)} ({-delta_gain_pct:.1f}%) overhead vs MC (no delta)")
+        print(
+            f"  Delta adds {_fmt_size(-delta_gain_bytes)} ({-delta_gain_pct:.1f}%) overhead vs MC (no delta)"
+        )
     else:
         print("  Delta had no effect on this corpus")
 
@@ -277,7 +313,9 @@ def run_benchmark(corpus_dir: Path) -> None:
         saving_bytes = tar_size - mc_delta_size
         saving_pct = saving_bytes / tar_size * 100
         print("CORPUS_EDGE_FOUND")
-        print(f"  MC (+ delta) is {_fmt_size(saving_bytes)} ({saving_pct:.1f}%) smaller than TAR+ZSTD")
+        print(
+            f"  MC (+ delta) is {_fmt_size(saving_bytes)} ({saving_pct:.1f}%) smaller than TAR+ZSTD"
+        )
     else:
         overhead_bytes = mc_delta_size - tar_size
         overhead_pct = overhead_bytes / tar_size * 100
@@ -295,7 +333,9 @@ def run_benchmark(corpus_dir: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark MetaCompressor corpus mode.")
+    parser = argparse.ArgumentParser(
+        description="Benchmark MetaCompressor corpus mode."
+    )
     parser.add_argument(
         "--corpus-dir",
         default=None,
@@ -317,6 +357,7 @@ def main() -> None:
             run_benchmark(Path(tmp))
             if args.keep:
                 import shutil
+
                 kept = Path(tempfile.mkdtemp(prefix="mc_bench_kept_"))
                 shutil.copytree(tmp, str(kept / "corpus"))
                 print(f"  Corpus kept at: {kept / 'corpus'}")

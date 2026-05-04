@@ -7,7 +7,7 @@ import os
 import pytest
 
 from metacompressor.compressor import compress
-from metacompressor.container import deserialise, deserialise_dir
+from metacompressor.container import deserialise
 from metacompressor.corpus import compress_corpus, decompress_corpus
 from metacompressor.decompressor import decompress
 from metacompressor.delta import (
@@ -19,10 +19,10 @@ from metacompressor.delta import (
 )
 from metacompressor.utils import CHUNK_SIZE
 
-
 # ---------------------------------------------------------------------------
 # Unit tests for delta.py primitives
 # ---------------------------------------------------------------------------
+
 
 class TestSimilarity:
     def test_identical(self):
@@ -99,7 +99,7 @@ class TestDeltaEncodedSize:
 
 class TestFindSimilarChunk:
     def test_finds_similar(self):
-        base = bytes(range(256)) * 16   # 4096 bytes
+        base = bytes(range(256)) * 16  # 4096 bytes
         target = bytearray(base)
         # Change 5% of bytes
         for i in range(0, 4096, 20):
@@ -122,7 +122,7 @@ class TestFindSimilarChunk:
 
     def test_returns_none_for_different_lengths(self):
         base = b"x" * 4096
-        target = b"x" * 2048   # different size
+        target = b"x" * 2048  # different size
         full_chunks = {0: base}
         result = find_similar_chunk(target, full_chunks, [0])
         assert result is None
@@ -134,7 +134,7 @@ class TestFindSimilarChunk:
     def test_prefers_most_similar(self):
         """Among multiple candidates the one with highest similarity wins."""
         n = CHUNK_SIZE
-        base_good = b"\xAA" * n
+        base_good = b"\xaa" * n
         base_poor = b"\x00" * n
         # target: 98% identical to base_good, ~50% to base_poor
         target = bytearray(base_good)
@@ -152,11 +152,12 @@ class TestFindSimilarChunk:
 # Integration: delta round-trips through compress / decompress
 # ---------------------------------------------------------------------------
 
+
 class TestDeltaRoundTrip:
     def test_similar_chunks_round_trip(self):
         """Data where consecutive chunks differ by a few bytes decompresses correctly."""
         chunk_size = CHUNK_SIZE
-        base = b"\xAB" * chunk_size
+        base = b"\xab" * chunk_size
         # Build several chunks that each differ from the previous by one byte.
         chunks = [base]
         for i in range(1, 20):
@@ -178,8 +179,8 @@ class TestDeltaRoundTrip:
     def test_partial_chunk_delta_round_trip(self):
         """Final partial chunk that is similar to a prior chunk round-trips."""
         chunk_size = CHUNK_SIZE
-        base = b"\xCC" * chunk_size
-        partial = b"\xCC" * (chunk_size - 100) + b"\xDD" * 100
+        base = b"\xcc" * chunk_size
+        partial = b"\xcc" * (chunk_size - 100) + b"\xdd" * 100
         # partial is 97.5% identical to base → should delta-encode
         data = base + partial
         assert decompress(compress(data)) == data
@@ -189,10 +190,11 @@ class TestDeltaRoundTrip:
 # Delta encoding actually fires (container inspection)
 # ---------------------------------------------------------------------------
 
+
 class TestDeltaEncoded:
     def _similar_data(self, n_chunks: int = 20) -> bytes:
         """Return data whose chunks are all 95%+ similar to the first one."""
-        base = b"\xAB" * CHUNK_SIZE
+        base = b"\xab" * CHUNK_SIZE
         chunks = [base]
         for i in range(1, n_chunks):
             mutated = bytearray(base)
@@ -204,13 +206,16 @@ class TestDeltaEncoded:
         """At least one delta chunk should appear for highly-similar data."""
         data = self._similar_data()
         mc1 = compress(data)
-        container = deserialise(mc1)
+        deserialise(mc1)
         # deserialise resolves deltas into chunks; verify by checking the raw payload
-        import zstandard as zstd
         import msgpack
+        import zstandard as zstd
+
         raw = zstd.ZstdDecompressor().decompress(mc1[5:])
         payload = msgpack.unpackb(raw, raw=False)
-        assert "delta_chunks" in payload, "Expected delta_chunks in payload for similar data"
+        assert (
+            "delta_chunks" in payload
+        ), "Expected delta_chunks in payload for similar data"
         assert len(payload["delta_chunks"]) > 0
 
     def test_delta_reduces_raw_payload_size(self):
@@ -233,21 +238,25 @@ class TestDeltaEncoded:
 # Delta encoding: fallback to full chunk when delta is larger
 # ---------------------------------------------------------------------------
 
+
 class TestDeltaFallback:
     def test_random_data_no_delta_chunks(self):
         """Purely random data has no similar chunks; no deltas should appear."""
         data = os.urandom(CHUNK_SIZE * 20)
         mc1 = compress(data)
 
-        import zstandard as zstd
         import msgpack
+        import zstandard as zstd
+
         raw = zstd.ZstdDecompressor().decompress(mc1[5:])
         payload = msgpack.unpackb(raw, raw=False)
-        assert "delta_chunks" not in payload or len(payload.get("delta_chunks", [])) == 0
+        assert (
+            "delta_chunks" not in payload or len(payload.get("delta_chunks", [])) == 0
+        )
 
     def test_fallback_preserves_round_trip(self):
         """Even with mixed similar and dissimilar chunks the round-trip is correct."""
-        similar_part = b"\xAA" * CHUNK_SIZE
+        similar_part = b"\xaa" * CHUNK_SIZE
         for i in range(10):
             mutated = bytearray(similar_part)
             mutated[i] = 0xFF
@@ -261,10 +270,11 @@ class TestDeltaFallback:
 # Corpus delta round-trips
 # ---------------------------------------------------------------------------
 
+
 class TestCorpusDelta:
     def test_similar_files_round_trip(self, tmp_path):
         """Corpus with many near-identical files decompresses correctly."""
-        base_content = b"\xBB" * CHUNK_SIZE * 4
+        base_content = b"\xbb" * CHUNK_SIZE * 4
         files: dict[str, bytes] = {}
         for i in range(10):
             mutated = bytearray(base_content)
@@ -285,7 +295,7 @@ class TestCorpusDelta:
 
     def test_corpus_delta_chunks_present(self, tmp_path):
         """Delta chunks appear in the .mc1dir payload for similar-file corpus."""
-        base_content = b"\xCC" * CHUNK_SIZE * 3
+        base_content = b"\xcc" * CHUNK_SIZE * 3
         corpus_dir = tmp_path / "corpus"
         corpus_dir.mkdir()
         for i in range(8):
@@ -295,8 +305,9 @@ class TestCorpusDelta:
 
         archive = compress_corpus(corpus_dir)
 
-        import zstandard as zstd
         import msgpack
+        import zstandard as zstd
+
         raw = zstd.ZstdDecompressor().decompress(archive[5:])
         payload = msgpack.unpackb(raw, raw=False)
         assert "delta_chunks" in payload
@@ -339,9 +350,10 @@ class TestCorpusDelta:
 # Determinism with delta encoding
 # ---------------------------------------------------------------------------
 
+
 class TestDeltaDeterminism:
     def test_same_similar_data_same_output(self):
-        base = b"\xDD" * CHUNK_SIZE
+        base = b"\xdd" * CHUNK_SIZE
         chunks = [base]
         for i in range(1, 15):
             m = bytearray(base)
@@ -351,7 +363,7 @@ class TestDeltaDeterminism:
         assert compress(data) == compress(data)
 
     def test_corpus_delta_deterministic(self, tmp_path):
-        base = b"\xEE" * CHUNK_SIZE * 2
+        base = b"\xee" * CHUNK_SIZE * 2
         files = {}
         for i in range(5):
             m = bytearray(base)

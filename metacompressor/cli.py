@@ -23,14 +23,14 @@ from pathlib import Path
 
 import zstandard as zstd
 
-from metacompressor.compressor import compress, CHUNKING_FIXED, CHUNKING_CDC
-from metacompressor.decompressor import decompress
+from metacompressor.compressor import CHUNKING_CDC, CHUNKING_FIXED, compress
 from metacompressor.corpus import compress_corpus, decompress_corpus
 from metacompressor.corpus_template import (
     compress_corpus_template,
     compress_corpus_template_with_metrics,
     decompress_corpus_template,
 )
+from metacompressor.decompressor import decompress
 from metacompressor.log_template import compress_log
 
 
@@ -93,8 +93,12 @@ def cmd_compare(args: argparse.Namespace) -> None:
     print(f"File            : {args.input}")
     print(f"Chunking mode   : {chunking_mode}")
     print(f"Original size   : {original_size:>12,} bytes")
-    print(f"MC size         : {mc_size:>12,} bytes  ratio {ratio(mc_size)}  time {mc_time*1000:.1f} ms")
-    print(f"ZSTD size       : {zstd_size:>12,} bytes  ratio {ratio(zstd_size)}  time {zstd_time*1000:.1f} ms")
+    print(
+        f"MC size         : {mc_size:>12,} bytes  ratio {ratio(mc_size)}  time {mc_time * 1000:.1f} ms"
+    )
+    print(
+        f"ZSTD size       : {zstd_size:>12,} bytes  ratio {ratio(zstd_size)}  time {zstd_time * 1000:.1f} ms"
+    )
 
 
 def cmd_compress_dir(args: argparse.Namespace) -> None:
@@ -110,14 +114,12 @@ def cmd_compress_dir(args: argparse.Namespace) -> None:
     output_path.write_bytes(mc1dir)
 
     # Calculate total uncompressed size for reporting
-    total_original = sum(
-        p.stat().st_size for p in input_dir.rglob("*") if p.is_file()
-    )
+    total_original = sum(p.stat().st_size for p in input_dir.rglob("*") if p.is_file())
     ratio = len(mc1dir) / total_original if total_original else float("nan")
     delta_label = "" if use_delta else " (no delta)"
     print(
         f"Compressed {input_dir}  ({total_original:,} bytes across files){delta_label}\n"
-        f"  → {output_path}  {len(mc1dir):,} bytes  ratio {ratio:.3f}  time {elapsed*1000:.1f} ms"
+        f"  → {output_path}  {len(mc1dir):,} bytes  ratio {ratio:.3f}  time {elapsed * 1000:.1f} ms"
     )
 
 
@@ -129,12 +131,10 @@ def cmd_decompress_dir(args: argparse.Namespace) -> None:
     extracted = decompress_corpus(data, output_dir)
     elapsed = time.perf_counter() - t0
 
-    total_out = sum(
-        (output_dir / p).stat().st_size for p in extracted
-    )
+    total_out = sum((output_dir / p).stat().st_size for p in extracted)
     print(
         f"Decompressed {len(data):,} bytes  → {len(extracted)} files  "
-        f"({total_out:,} bytes total)  time {elapsed*1000:.1f} ms"
+        f"({total_out:,} bytes total)  time {elapsed * 1000:.1f} ms"
     )
 
 
@@ -148,13 +148,11 @@ def cmd_compress_template_dir(args: argparse.Namespace) -> None:
 
     output_path.write_bytes(mck)
 
-    total_original = sum(
-        p.stat().st_size for p in input_dir.rglob("*") if p.is_file()
-    )
+    total_original = sum(p.stat().st_size for p in input_dir.rglob("*") if p.is_file())
     ratio = len(mck) / total_original if total_original else float("nan")
     print(
         f"Compressed (template-dir) {input_dir}  ({total_original:,} bytes across files)\n"
-        f"  → {output_path}  {len(mck):,} bytes  ratio {ratio:.3f}  time {elapsed*1000:.1f} ms"
+        f"  → {output_path}  {len(mck):,} bytes  ratio {ratio:.3f}  time {elapsed * 1000:.1f} ms"
     )
 
 
@@ -166,12 +164,10 @@ def cmd_decompress_template_dir(args: argparse.Namespace) -> None:
     extracted = decompress_corpus_template(data, output_dir)
     elapsed = time.perf_counter() - t0
 
-    total_out = sum(
-        (output_dir / p).stat().st_size for p in extracted
-    )
+    total_out = sum((output_dir / p).stat().st_size for p in extracted)
     print(
         f"Decompressed (template-dir) {len(data):,} bytes  → {len(extracted)} files  "
-        f"({total_out:,} bytes total)  time {elapsed*1000:.1f} ms"
+        f"({total_out:,} bytes total)  time {elapsed * 1000:.1f} ms"
     )
 
 
@@ -206,7 +202,7 @@ def format_delta(mc_size: int, baseline_size: int, baseline_label: str) -> str:
     """
     delta = mc_size - baseline_size
     if baseline_size == 0:
-        return f"(baseline size is 0, delta not meaningful)"
+        return "(baseline size is 0, delta not meaningful)"
     pct = abs(delta) / baseline_size * 100
     if delta < 0:
         return f"MC corpus-template is {abs(delta):,} bytes ({pct:.1f}%) SMALLER than {baseline_label}."
@@ -228,7 +224,9 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # Read all file data once
-    file_data = [(p.relative_to(input_dir).as_posix(), p.read_bytes()) for p in all_files]
+    file_data = [
+        (p.relative_to(input_dir).as_posix(), p.read_bytes()) for p in all_files
+    ]
     total_original = sum(len(d) for _, d in file_data)
 
     # --- MetaCompressor corpus ---
@@ -270,11 +268,11 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     print(f"Original size        : {total_original:>12,} bytes  (sum of all files)")
     print(
         f"MC corpus            : {mc_size:>12,} bytes  ratio {ratio(mc_size)}"
-        f"  time {mc_time*1000:.1f} ms"
+        f"  time {mc_time * 1000:.1f} ms"
     )
     print(
         f"MC template final    : {mck_size:>12,} bytes  ratio {ratio(mck_size)}"
-        f"  time {mck_timing['total_s']*1000:.1f} ms"
+        f"  time {mck_timing['total_s'] * 1000:.1f} ms"
     )
     print(
         f"MC template row      : {row_mode_size:>12,} bytes  ratio {ratio(row_mode_size)}"
@@ -284,15 +282,15 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     )
     print(
         f"ZSTD per-file        : {zstd_total:>12,} bytes  ratio {ratio(zstd_total)}"
-        f"  time {zstd_time*1000:.1f} ms"
+        f"  time {zstd_time * 1000:.1f} ms"
     )
     print(
         f"Template per-file    : {template_total:>12,} bytes  ratio {ratio(template_total)}"
-        f"  time {template_time*1000:.1f} ms"
+        f"  time {template_time * 1000:.1f} ms"
     )
     print(
         f"TAR+ZSTD             : {tar_zstd:>12,} bytes  ratio {ratio(tar_zstd)}"
-        f"  time {tar_zstd_time*1000:.1f} ms"
+        f"  time {tar_zstd_time * 1000:.1f} ms"
     )
 
     print()
@@ -302,10 +300,10 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
 
     print()
     print("--- Corpus-template timing breakdown ---")
-    print(f"  Template extraction : {mck_timing['extract_s']*1000:>8.1f} ms")
-    print(f"  Serialisation       : {mck_timing['serialize_s']*1000:>8.1f} ms")
-    print(f"  Zstd compression    : {mck_timing['zstd_s']*1000:>8.1f} ms")
-    print(f"  Total               : {mck_timing['total_s']*1000:>8.1f} ms")
+    print(f"  Template extraction : {mck_timing['extract_s'] * 1000:>8.1f} ms")
+    print(f"  Serialisation       : {mck_timing['serialize_s'] * 1000:>8.1f} ms")
+    print(f"  Zstd compression    : {mck_timing['zstd_s'] * 1000:>8.1f} ms")
+    print(f"  Total               : {mck_timing['total_s'] * 1000:>8.1f} ms")
 
     print()
     print("--- Corpus-template explainability ---")
@@ -318,9 +316,9 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     print(f"  Normalized templates: {metrics['normalized_template_count']:,}")
     print(f"  Fuzzy merges        : {metrics['fuzzy_merge_count']:,}")
     print(f"  Template reuse count: {metrics['template_reuse_count']:,}")
-    print(f"  Template reuse rate : {metrics['template_reuse_rate']*100:.1f}%")
-    print(f"  Reuse before        : {metrics['template_reuse_before']*100:.1f}%")
-    print(f"  Reuse after         : {metrics['template_reuse_after']*100:.1f}%")
+    print(f"  Template reuse rate : {metrics['template_reuse_rate'] * 100:.1f}%")
+    print(f"  Reuse before        : {metrics['template_reuse_before'] * 100:.1f}%")
+    print(f"  Reuse after         : {metrics['template_reuse_after'] * 100:.1f}%")
     print(f"  Raw fallback lines  : {metrics['raw_fallback_lines']:,}")
     print(f"  Binary fallback files:{metrics['binary_fallback_files']}")
     print(f"  Fallback reasons    : {metrics['fallback_reason_counts']}")
@@ -369,7 +367,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compare.set_defaults(func=cmd_compare)
 
-    p_compress_dir = sub.add_parser("compress-dir", help="Compress a directory to .mc1dir (corpus mode)")
+    p_compress_dir = sub.add_parser(
+        "compress-dir", help="Compress a directory to .mc1dir (corpus mode)"
+    )
     p_compress_dir.add_argument("input_dir", help="Input directory path")
     p_compress_dir.add_argument("output", help="Output .mc1dir file path")
     p_compress_dir.add_argument(
@@ -380,12 +380,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compress_dir.set_defaults(func=cmd_compress_dir)
 
-    p_decompress_dir = sub.add_parser("decompress-dir", help="Decompress a .mc1dir archive to a directory")
+    p_decompress_dir = sub.add_parser(
+        "decompress-dir", help="Decompress a .mc1dir archive to a directory"
+    )
     p_decompress_dir.add_argument("input", help="Input .mc1dir file path")
     p_decompress_dir.add_argument("output_dir", help="Output directory path")
     p_decompress_dir.set_defaults(func=cmd_decompress_dir)
 
-    p_compare_dir = sub.add_parser("compare-dir", help="Compare MC corpus / corpus-template / TAR+ZSTD on a directory")
+    p_compare_dir = sub.add_parser(
+        "compare-dir",
+        help="Compare MC corpus / corpus-template / TAR+ZSTD on a directory",
+    )
     p_compare_dir.add_argument("input_dir", help="Input directory path")
     p_compare_dir.set_defaults(func=cmd_compare_dir)
 

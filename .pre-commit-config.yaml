@@ -1,0 +1,37 @@
+# Install: pip install -e ".[dev]" && pre-commit install && pre-commit install --hook-type pre-push
+# Run all: pre-commit run --all-files && pre-commit run --all-files --hook-stage pre-push
+
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.4
+    hooks:
+      - id: ruff
+      # Black is canonical formatter in CI; do not enable ruff-format here (can disagree on a few files).
+
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(results|mc_test_output|tmp_metacompressor_test)/
+      - id: end-of-file-fixer
+        exclude: ^(results|mc_test_output|tmp_metacompressor_test)/
+      - id: check-yaml
+        args: [--unsafe]
+
+  # Full suite on pre-push (~30s). Uses repo `.venv` when present (see scripts/run_precommit_pytest.py).
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (full suite)
+        entry: python scripts/run_precommit_pytest.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

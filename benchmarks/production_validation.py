@@ -12,7 +12,6 @@ import gzip
 import hashlib
 import io
 import json
-import os
 import random
 import shutil
 import sys
@@ -32,21 +31,20 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from metacompressor.corpus_template import (  # noqa: E402
     _MIN_TEMPLATE_OCCURRENCES,
-    _MODE_COLUMNAR_V2,
     _MODE_COLUMNAR_V1,
+    _MODE_COLUMNAR_V2,
     _MODE_RAW_TAR_ZSTD,
     _MODE_ROW_V1,
-    _LineAnalysis,
     _analyze_line,
     _build_columnar_template_archive,
     _build_row_template_archive,
     _iter_text_lines,
-    compress_corpus_template_with_metrics,
-    decompress_corpus_template,
+    _LineAnalysis,
     _template_string,
     _tokenize_legacy,
+    compress_corpus_template_with_metrics,
+    decompress_corpus_template,
 )
-
 
 _RESULTS_DIR = REPO_ROOT / "results"
 _MARKDOWN_PATH = _RESULTS_DIR / "metacompressor_production_validation.md"
@@ -61,10 +59,10 @@ _KB = 1024
 _MB = 1024 * 1024
 
 _STACK_TRACE_LINES = [
-    'Traceback (most recent call last):\n',
+    "Traceback (most recent call last):\n",
     '  File "/srv/app/handlers.py", line 182, in handle\n',
     '  File "/srv/app/db.py", line 87, in query_user\n',
-    'RuntimeError: upstream timeout after 2500ms\n',
+    "RuntimeError: upstream timeout after 2500ms\n",
 ]
 
 _USER_AGENTS = [
@@ -239,11 +237,16 @@ def _build_deterministic_tar(input_dir: Path, tar_path: Path) -> None:
 
 
 def _compare_trees(original_dir: Path, restored_dir: Path) -> None:
-    original_files = [path.relative_to(original_dir).as_posix() for path in _iter_files(original_dir)]
-    restored_files = [path.relative_to(restored_dir).as_posix() for path in _iter_files(restored_dir)]
+    original_files = [
+        path.relative_to(original_dir).as_posix() for path in _iter_files(original_dir)
+    ]
+    restored_files = [
+        path.relative_to(restored_dir).as_posix() for path in _iter_files(restored_dir)
+    ]
     if original_files != restored_files:
         raise ValidationError(
-            "file set mismatch: original=%s restored=%s" % (original_files, restored_files)
+            "file set mismatch: original=%s restored=%s"
+            % (original_files, restored_files)
         )
     for rel in original_files:
         original_bytes = (original_dir / rel).read_bytes()
@@ -264,7 +267,7 @@ def _measure_peak_mb(func: Callable[[], Tuple[Any, Any]]) -> Tuple[Any, Any, flo
 
 def _brotli_available() -> bool:
     try:
-        import brotli  # type: ignore[import]
+        import brotli  # noqa: F401  # type: ignore[import-not-found]
 
         return True
     except Exception:
@@ -411,9 +414,7 @@ def _compress_forced_mode(
         raise ValueError("unsupported mode: %s" % mode)
 
     template_reuse_count = stats["template_reuse_count"]
-    reuse_rate = (
-        template_reuse_count / total_lines if total_lines > 0 else 0.0
-    )
+    reuse_rate = template_reuse_count / total_lines if total_lines > 0 else 0.0
     avg_vars = (
         stats["total_var_slots"] / template_reuse_count
         if template_reuse_count > 0
@@ -446,7 +447,9 @@ def _compress_forced_mode(
         "num_encoded_columns": column_stats["num_encoded_columns"],
         "column_encoding_counts": column_stats["column_encoding_counts"],
         "raw_column_fallback_count": column_stats["raw_column_fallback_count"],
-        "columnar_size": len(archive) if mode in (_MODE_COLUMNAR_V1, _MODE_COLUMNAR_V2) else None,
+        "columnar_size": (
+            len(archive) if mode in (_MODE_COLUMNAR_V1, _MODE_COLUMNAR_V2) else None
+        ),
         "row_mode_size": len(archive) if mode == _MODE_ROW_V1 else None,
         "columnar_savings_vs_row": None,
         "final_selected_mode": mode,
@@ -611,7 +614,11 @@ def _gzip_tar_compressor(tar_path: Path, archive_path: Path) -> None:
 
 
 def _gzip_tar_decompressor(archive_path: Path, tar_path: Path) -> None:
-    with archive_path.open("rb") as src, gzip.GzipFile(fileobj=src, mode="rb") as gz, tar_path.open("wb") as dst:
+    with (
+        archive_path.open("rb") as src,
+        gzip.GzipFile(fileobj=src, mode="rb") as gz,
+        tar_path.open("wb") as dst,
+    ):
         shutil.copyfileobj(gz, dst, length=1024 * 1024)
 
 
@@ -667,7 +674,9 @@ def _service_line_factory(
         if index % 5:
             base[0] += " user_id=%s" % user_id
         if index % 7:
-            base[0] += " region=%s" % ["us-east-1", "eu-west-1", "ap-southeast-2"][index % 3]
+            base[0] += (
+                " region=%s" % ["us-east-1", "eu-west-1", "ap-southeast-2"][index % 3]
+            )
         base[0] += "\n"
         if index % 111 == 0:
             error_prefix = (
@@ -680,7 +689,9 @@ def _service_line_factory(
     return factory
 
 
-def _generate_app_service_logs(root: Path, target_mb: int, seed: int, files: int) -> None:
+def _generate_app_service_logs(
+    root: Path, target_mb: int, seed: int, files: int
+) -> None:
     rng = random.Random(seed)
     per_file = (target_mb * _MB) // files
     services = [
@@ -708,7 +719,12 @@ def _generate_ndjson_logs(root: Path, target_mb: int, seed: int, files: int) -> 
         def factory(index: int) -> List[str]:
             record = {
                 "ts": "2026-03-%02dT%02d:%02d:%02dZ"
-                % ((index % 27) + 1, (index // 3600) % 24, (index // 60) % 60, index % 60),
+                % (
+                    (index % 27) + 1,
+                    (index // 3600) % 24,
+                    (index // 60) % 60,
+                    index % 60,
+                ),
                 "service": ["api", "auth", "catalog", "worker", "queue"][stream_id % 5],
                 "level": ["INFO", "WARN", "ERROR"][index % 3],
                 "request_id": _random_uuid(rng),
@@ -796,7 +812,9 @@ def _generate_mixed_microservice_logs(root: Path, target_mb: int, seed: int) -> 
                 ["email", "billing", "reindex", "cleanup"][index % 4],
                 index % 16,
                 _random_uuid(rng),
-                ["send-email", "capture-payment", "refresh-cache", "sync-search"][index % 4],
+                ["send-email", "capture-payment", "refresh-cache", "sync-search"][
+                    index % 4
+                ],
                 index % 5,
                 ["success", "retry", "timeout"][index % 3],
                 50 + (index % 4000),
@@ -807,7 +825,9 @@ def _generate_mixed_microservice_logs(root: Path, target_mb: int, seed: int) -> 
     _append_lines_until_size(extra, per_file, worker_factory)
 
 
-def _generate_high_cardinality_logs(root: Path, target_mb: int, seed: int, files: int) -> None:
+def _generate_high_cardinality_logs(
+    root: Path, target_mb: int, seed: int, files: int
+) -> None:
     rng = random.Random(seed)
     per_file = (target_mb * _MB) // files
 
@@ -896,7 +916,9 @@ def _generate_binary_compressed_mix(root: Path, seed: int) -> None:
     _generate_app_service_logs(root / "text", 8, seed + 1, 4)
     _generate_ndjson_logs(root / "json", 4, seed + 2, 2)
 
-    raw_payload = ("INFO event=1 status=200 path=/api variant=warmup\n" * 20000).encode("utf-8")
+    raw_payload = ("INFO event=1 status=200 path=/api variant=warmup\n" * 20000).encode(
+        "utf-8"
+    )
     gz_path = root / "precompressed/archive.tar.gz"
     gz_path.parent.mkdir(parents=True, exist_ok=True)
     with gz_path.open("wb") as raw_out:
@@ -973,7 +995,9 @@ def _dataset_specs(include_very_large: bool) -> List[DatasetSpec]:
             dataset_type="app/service logs",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(root, 12, seed=101, files=10),
+            generator=lambda root: _generate_app_service_logs(
+                root, 12, seed=101, files=10
+            ),
         ),
         DatasetSpec(
             name="json_ndjson_logs",
@@ -994,14 +1018,18 @@ def _dataset_specs(include_very_large: bool) -> List[DatasetSpec]:
             dataset_type="mixed microservice logs",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_mixed_microservice_logs(root, 18, seed=404),
+            generator=lambda root: _generate_mixed_microservice_logs(
+                root, 18, seed=404
+            ),
         ),
         DatasetSpec(
             name="high_cardinality_logs",
             dataset_type="high-cardinality logs",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_high_cardinality_logs(root, 10, seed=505, files=6),
+            generator=lambda root: _generate_high_cardinality_logs(
+                root, 10, seed=505, files=6
+            ),
         ),
         DatasetSpec(
             name="noisy_low_structure_logs",
@@ -1022,14 +1050,18 @@ def _dataset_specs(include_very_large: bool) -> List[DatasetSpec]:
             dataset_type="large corpus: 100MB+",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(root, 128, seed=808, files=20),
+            generator=lambda root: _generate_app_service_logs(
+                root, 128, seed=808, files=20
+            ),
         ),
         DatasetSpec(
             name="many_small_files_5000",
             dataset_type="many-small-files corpus",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_many_small_files(root, seed=909, files=5000),
+            generator=lambda root: _generate_many_small_files(
+                root, seed=909, files=5000
+            ),
         ),
     ]
     if include_very_large:
@@ -1039,7 +1071,9 @@ def _dataset_specs(include_very_large: bool) -> List[DatasetSpec]:
                 dataset_type="very large corpus: 500MB+",
                 realism="synthetic",
                 structured=True,
-                generator=lambda root: _generate_app_service_logs(root, 512, seed=1001, files=32),
+                generator=lambda root: _generate_app_service_logs(
+                    root, 512, seed=1001, files=32
+                ),
             )
         )
     return specs
@@ -1052,11 +1086,15 @@ def _build_dataset(dataset_dir: Path, spec: DatasetSpec) -> None:
     spec.generator(dataset_dir)
 
 
-def _measure_dataset(dataset_dir: Path, spec: DatasetSpec, work_dir: Path) -> Dict[str, Any]:
+def _measure_dataset(
+    dataset_dir: Path, spec: DatasetSpec, work_dir: Path
+) -> Dict[str, Any]:
     raw_size = sum(path.stat().st_size for path in _iter_files(dataset_dir))
     methods: Dict[str, Optional[Dict[str, Any]]] = {}
 
-    methods["zstd_per_file"] = _run_zstd_per_file(dataset_dir, work_dir / "zstd_per_file")
+    methods["zstd_per_file"] = _run_zstd_per_file(
+        dataset_dir, work_dir / "zstd_per_file"
+    )
     methods["tar_zstd"] = _run_tar_baseline(
         dataset_dir,
         work_dir / "tar_zstd",
@@ -1083,13 +1121,17 @@ def _measure_dataset(dataset_dir: Path, spec: DatasetSpec, work_dir: Path) -> Di
     else:
         methods["brotli"] = None
 
-    methods["mc_row_template"] = _run_mc_mode(dataset_dir, _MODE_ROW_V1, work_dir / "mc_row")
+    methods["mc_row_template"] = _run_mc_mode(
+        dataset_dir, _MODE_ROW_V1, work_dir / "mc_row"
+    )
     methods["mc_columnar_template"] = _run_mc_mode(
         dataset_dir,
         _MODE_COLUMNAR_V2,
         work_dir / "mc_columnar",
     )
-    methods["mc_final_selected"] = _run_mc_mode(dataset_dir, "auto", work_dir / "mc_final")
+    methods["mc_final_selected"] = _run_mc_mode(
+        dataset_dir, "auto", work_dir / "mc_final"
+    )
     methods["mc_before_selected"] = _run_mc_mode(
         dataset_dir,
         "auto",
@@ -1140,7 +1182,9 @@ def _measure_dataset(dataset_dir: Path, spec: DatasetSpec, work_dir: Path) -> Di
             "delta_vs_tar_zstd_pct": delta_tar_pct,
             "delta_vs_zstd_per_file_pct": delta_zstd_pct,
             "reduction_vs_raw_pct": raw_reduction_pct,
-            "verdict": _mode_verdict(delta_tar_pct if delta_tar_pct is not None else 0.0),
+            "verdict": _mode_verdict(
+                delta_tar_pct if delta_tar_pct is not None else 0.0
+            ),
         },
     }
 
@@ -1150,7 +1194,10 @@ def _build_final_verdict(dataset_results: List[Dict[str, Any]]) -> str:
     structured_regression = False
     for result in dataset_results:
         delta_pct = result["mc_summary"]["delta_vs_tar_zstd_pct"]
-        if delta_pct is not None and result["realism"] in ("semi-realistic", "real-world"):
+        if delta_pct is not None and result["realism"] in (
+            "semi-realistic",
+            "real-world",
+        ):
             if delta_pct <= -10.0:
                 realistic_wins += 1
         if result["structured"] and delta_pct is not None and delta_pct > 10.0:
@@ -1376,23 +1423,30 @@ def _build_markdown_report(
             "- Realism: %s" % result["realism"],
             "- Raw size: %s" % _fmt_bytes(result["raw_size"]),
             "- Selected MC mode: `%s`" % summary["selected_mode"],
-            "- Before Δ vs TAR+ZSTD: %s" % _fmt_pct(summary["before_delta_vs_tar_zstd_pct"]),
+            "- Before Δ vs TAR+ZSTD: %s"
+            % _fmt_pct(summary["before_delta_vs_tar_zstd_pct"]),
             "- Delta vs TAR+ZSTD: %s" % _fmt_pct(summary["delta_vs_tar_zstd_pct"]),
-            "- Delta vs ZSTD per-file: %s" % _fmt_pct(summary["delta_vs_zstd_per_file_pct"]),
+            "- Delta vs ZSTD per-file: %s"
+            % _fmt_pct(summary["delta_vs_zstd_per_file_pct"]),
             "- Raw reduction: %s" % _fmt_pct(summary["reduction_vs_raw_pct"]),
             "- Template count: %d" % summary["template_count"],
             "- JSON lines detected: %d" % summary["json_lines_detected"],
             "- JSON template count: %d" % summary["json_template_count"],
             "- Normalized template count: %d" % summary["normalized_template_count"],
             "- Fuzzy merge count: %d" % summary["fuzzy_merge_count"],
-            "- Template reuse before: %s" % _fmt_pct(summary["template_reuse_before"] * 100.0),
-            "- Template reuse rate: %s" % _fmt_pct(summary["template_reuse_rate"] * 100.0),
-            "- Template reuse after: %s" % _fmt_pct(summary["template_reuse_after"] * 100.0),
+            "- Template reuse before: %s"
+            % _fmt_pct(summary["template_reuse_before"] * 100.0),
+            "- Template reuse rate: %s"
+            % _fmt_pct(summary["template_reuse_rate"] * 100.0),
+            "- Template reuse after: %s"
+            % _fmt_pct(summary["template_reuse_after"] * 100.0),
             "- Column count: %d" % summary["column_count"],
-            "- Column encodings: `%s`" % json.dumps(summary["column_encoding_counts"], sort_keys=True),
+            "- Column encodings: `%s`"
+            % json.dumps(summary["column_encoding_counts"], sort_keys=True),
             "- Low-structure fallback files: %d" % summary["raw_fallback_files"],
             "- Binary fallback files: %d" % summary["binary_fallback_files"],
-            "- Fallback reasons: `%s`" % json.dumps(summary["fallback_reason_counts"], sort_keys=True),
+            "- Fallback reasons: `%s`"
+            % json.dumps(summary["fallback_reason_counts"], sort_keys=True),
             "",
             "| Method | Size | Ratio | Δ vs TAR+ZSTD | Compress s | Decompress s | Peak MB |",
             "|---|---:|---:|---:|---:|---:|---:|",
@@ -1410,18 +1464,18 @@ def _build_markdown_report(
             if method is None:
                 lines.append("| %s | n/a | n/a | n/a | n/a | n/a | n/a |" % method_name)
                 continue
-            ratio = (
-                result["raw_size"] / method["size"]
-                if method["size"] > 0
-                else 0.0
-            )
+            ratio = result["raw_size"] / method["size"] if method["size"] > 0 else 0.0
             lines.append(
                 "| %s | %s | %.2fx | %s | %.3f | %.3f | %.1f |"
                 % (
                     method_name,
                     _fmt_bytes(method["size"]),
                     ratio,
-                    _fmt_pct(_delta_pct(method["size"], result["methods"]["tar_zstd"]["size"])),
+                    _fmt_pct(
+                        _delta_pct(
+                            method["size"], result["methods"]["tar_zstd"]["size"]
+                        )
+                    ),
                     method["compress_s"],
                     method["decompress_s"],
                     method["peak_mem_mb"],
@@ -1464,7 +1518,9 @@ def _build_structure_v2_report(dataset_results: List[Dict[str, Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def run_validation(output_dir: Optional[Path] = None, include_very_large: bool = True) -> Dict[str, Any]:
+def run_validation(
+    output_dir: Optional[Path] = None, include_very_large: bool = True
+) -> Dict[str, Any]:
     dataset_results: List[Dict[str, Any]] = []
     brotli_available = _brotli_available()
 
@@ -1500,7 +1556,9 @@ def run_validation(output_dir: Optional[Path] = None, include_very_large: bool =
     output_dir.mkdir(parents=True, exist_ok=True)
     markdown = _build_markdown_report(dataset_results, final_verdict, brotli_available)
     structure_v2_markdown = _build_structure_v2_report(dataset_results)
-    (output_dir / _JSON_PATH.name).write_text(_json_dumps(payload) + "\n", encoding="utf-8")
+    (output_dir / _JSON_PATH.name).write_text(
+        _json_dumps(payload) + "\n", encoding="utf-8"
+    )
     (output_dir / _MARKDOWN_PATH.name).write_text(markdown, encoding="utf-8")
     (output_dir / _STRUCTURE_V2_REPORT_PATH.name).write_text(
         structure_v2_markdown,
@@ -1510,7 +1568,9 @@ def run_validation(output_dir: Optional[Path] = None, include_very_large: bool =
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run MetaCompressor production validation.")
+    parser = argparse.ArgumentParser(
+        description="Run MetaCompressor production validation."
+    )
     parser.add_argument(
         "--output-dir",
         default=str(_RESULTS_DIR),
@@ -1544,7 +1604,10 @@ def main() -> None:
             + "\n",
             encoding="utf-8",
         )
-        _MARKDOWN_PATH.write_text("# MetaCompressor Production Validation Report\n\n%s\n" % message, encoding="utf-8")
+        _MARKDOWN_PATH.write_text(
+            "# MetaCompressor Production Validation Report\n\n%s\n" % message,
+            encoding="utf-8",
+        )
         print(message)
         raise SystemExit(1)
     except Exception as exc:
@@ -1563,7 +1626,10 @@ def main() -> None:
             + "\n",
             encoding="utf-8",
         )
-        _MARKDOWN_PATH.write_text("# MetaCompressor Production Validation Report\n\n%s\n" % message, encoding="utf-8")
+        _MARKDOWN_PATH.write_text(
+            "# MetaCompressor Production Validation Report\n\n%s\n" % message,
+            encoding="utf-8",
+        )
         print(message)
         raise
 

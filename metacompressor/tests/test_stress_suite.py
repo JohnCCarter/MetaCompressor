@@ -28,9 +28,8 @@ import time
 import tracemalloc
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-import msgpack
 import pytest
 import zstandard as zstd
 
@@ -40,7 +39,6 @@ from metacompressor.corpus_template import (
     decompress_corpus_template,
 )
 from metacompressor.log_template import (
-    TEMPLATE_MODE_VALIDATE,
     compress_log,
     decompress_log,
     get_compress_mode,
@@ -51,7 +49,11 @@ from metacompressor.log_template import (
 # ---------------------------------------------------------------------------
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
-_RESULTS_DIR = _REPO_ROOT / "results"
+_RESULTS_DIR = (
+    Path(os.environ["METACOMPRESSOR_TEST_RESULTS_DIR"])
+    if os.environ.get("METACOMPRESSOR_TEST_RESULTS_DIR")
+    else _REPO_ROOT / "results"
+)
 
 # Regression threshold: flag if MC is more than 10 % larger than TAR+ZSTD.
 _REGRESSION_THRESHOLD = 1.10
@@ -91,7 +93,7 @@ def gen_large_file(tmp: Path, size_mb: int = 10) -> Path:
 def gen_many_small_files(tmp: Path, n: int = 500) -> Path:
     files = {
         f"logs/day{i:04d}.log": (
-            f"INFO event={i} status=200\nWARN event={i+1} code=429\n" * 3
+            f"INFO event={i} status=200\nWARN event={i + 1} code=429\n" * 3
         ).encode()
         for i in range(n)
     }
@@ -125,7 +127,9 @@ def gen_repetitive(tmp: Path) -> Path:
 
 
 def gen_unique_content(tmp: Path) -> Path:
-    lines = [f"UNIQUE line #{i} payload={os.urandom(4).hex()}\n".encode() for i in range(200)]
+    lines = [
+        f"UNIQUE line #{i} payload={os.urandom(4).hex()}\n".encode() for i in range(200)
+    ]
     return _write_corpus(tmp, {"unique.log": b"".join(lines)})
 
 
@@ -150,7 +154,7 @@ def gen_high_cardinality(tmp: Path) -> Path:
 
 def gen_nginx_logs(tmp: Path) -> Path:
     template = (
-        '192.168.{a}.{b} - - [01/Jan/2024:00:{mm:02d}:{ss:02d} +0000] '
+        "192.168.{a}.{b} - - [01/Jan/2024:00:{mm:02d}:{ss:02d} +0000] "
         '"GET /api/v{v}/resource/{rid} HTTP/1.1" {code} {size} '
         '"-" "Mozilla/5.0" {lat}\n'
     )
@@ -174,7 +178,7 @@ def gen_nginx_logs(tmp: Path) -> Path:
 
 def gen_json_corpus(tmp: Path) -> Path:
     ndjson_lines = [
-        f'{{"ts":"2024-01-01T00:{i//60:02d}:{i%60:02d}Z","level":"INFO","msg":"req","id":{i}}}\n'.encode()
+        f'{{"ts":"2024-01-01T00:{i // 60:02d}:{i % 60:02d}Z","level":"INFO","msg":"req","id":{i}}}\n'.encode()
         for i in range(500)
     ]
     return _write_corpus(
@@ -285,9 +289,7 @@ def _emit_report() -> None:
 
     crashes = [r for r in _RESULTS if r["status"] == "CRASH"]
     regressions = [
-        r
-        for r in _RESULTS
-        if r.get("delta_pct") is not None and r["delta_pct"] > 10.0
+        r for r in _RESULTS if r.get("delta_pct") is not None and r["delta_pct"] > 10.0
     ]
 
     if crashes:
@@ -391,12 +393,17 @@ class TestRobustness:
         corpus = gen_empty_file(tmp_path)
         archive = compress_corpus_template(corpus)
         out = tmp_path / "out"
-        recovered = decompress_corpus_template(archive, out)
+        decompress_corpus_template(archive, out)
         assert (out / "empty.txt").read_bytes() == b""
         assert (out / "anchor.log").read_bytes() == b"INFO x=1\n" * 5
         tz = tar_zstd_compress_dir(corpus)
-        _record("A-empty_file", "PASS", len(archive), len(tz),
-                "empty file in corpus – must round-trip with zero bytes")
+        _record(
+            "A-empty_file",
+            "PASS",
+            len(archive),
+            len(tz),
+            "empty file in corpus – must round-trip with zero bytes",
+        )
 
     def test_single_byte_file(self, tmp_path):
         corpus = gen_single_byte(tmp_path)
@@ -428,13 +435,21 @@ class TestRobustness:
         assert (out / "large.log").read_bytes() == original
 
         tz = tar_zstd_compress_dir(corpus)
-        notes = f"10 MB structured log"
+        notes = "10 MB structured log"
         if compress_s > 5.0:
             _SLOW_CASES.append(f"A-large_file: compress {compress_s:.2f}s")
         if peak_mb > 200:
             _MEMORY_SPIKES.append(f"A-large_file: {peak_mb:.0f} MB")
-        _record("A-large_file", "PASS", len(archive), len(tz), notes,
-                compress_s=compress_s, decompress_s=decompress_s, peak_mem_mb=peak_mb)
+        _record(
+            "A-large_file",
+            "PASS",
+            len(archive),
+            len(tz),
+            notes,
+            compress_s=compress_s,
+            decompress_s=decompress_s,
+            peak_mem_mb=peak_mb,
+        )
 
     def test_many_small_files(self, tmp_path):
         corpus = gen_many_small_files(tmp_path, n=500)
@@ -450,14 +465,20 @@ class TestRobustness:
         # Spot-check a few files
         for i in [0, 100, 499]:
             expected = (corpus / f"logs/day{i:04d}.log").read_bytes()
-            assert (out / f"logs/day{i:04d}.log").read_bytes() == expected, (
-                f"Mismatch for day{i:04d}.log"
-            )
+            assert (
+                out / f"logs/day{i:04d}.log"
+            ).read_bytes() == expected, f"Mismatch for day{i:04d}.log"
 
         tz = tar_zstd_compress_dir(corpus)
-        _record("A-many_small_files", "PASS", len(archive), len(tz),
-                "500 small structured log files",
-                compress_s=compress_s, decompress_s=decompress_s)
+        _record(
+            "A-many_small_files",
+            "PASS",
+            len(archive),
+            len(tz),
+            "500 small structured log files",
+            compress_s=compress_s,
+            decompress_s=decompress_s,
+        )
 
     def test_mixed_text_and_binary(self, tmp_path):
         corpus = gen_mixed_corpus(tmp_path)
@@ -470,8 +491,13 @@ class TestRobustness:
         ]:
             assert (out / name).read_bytes() == data, f"Mismatch: {name}"
         tz = tar_zstd_compress_dir(corpus)
-        _record("A-mixed_text_binary", "PASS", len(archive), len(tz),
-                "text + binary in same corpus")
+        _record(
+            "A-mixed_text_binary",
+            "PASS",
+            len(archive),
+            len(tz),
+            "text + binary in same corpus",
+        )
 
     def test_long_lines(self, tmp_path):
         corpus = gen_long_lines(tmp_path)
@@ -489,11 +515,19 @@ class TestRobustness:
         archive = compress_corpus_template(corpus)
         out = tmp_path / "out"
         decompress_corpus_template(archive, out)
-        assert (out / "nonl.log").read_bytes() == original, \
+        assert (
+            out / "nonl.log"
+        ).read_bytes() == original, (
             "No-trailing-newline file must round-trip byte-for-byte"
+        )
         tz = tar_zstd_compress_dir(corpus)
-        _record("A-no_trailing_newline", "PASS", len(archive), len(tz),
-                "file with no trailing newline")
+        _record(
+            "A-no_trailing_newline",
+            "PASS",
+            len(archive),
+            len(tz),
+            "file with no trailing newline",
+        )
 
     def test_repetitive_content(self, tmp_path):
         corpus = gen_repetitive(tmp_path)
@@ -507,8 +541,13 @@ class TestRobustness:
         total_raw = sum(p.stat().st_size for p in corpus.rglob("*") if p.is_file())
         ratio = len(archive) / total_raw
         tz = tar_zstd_compress_dir(corpus)
-        _record("A-repetitive_content", "PASS", len(archive), len(tz),
-                f"5 000 identical lines; ratio={ratio:.4f}; tpl_reuse={metrics['template_reuse_rate']:.2f}")
+        _record(
+            "A-repetitive_content",
+            "PASS",
+            len(archive),
+            len(tz),
+            f"5 000 identical lines; ratio={ratio:.4f}; tpl_reuse={metrics['template_reuse_rate']:.2f}",
+        )
 
     def test_unique_content(self, tmp_path):
         corpus = gen_unique_content(tmp_path)
@@ -518,8 +557,13 @@ class TestRobustness:
         original = (corpus / "unique.log").read_bytes()
         assert (out / "unique.log").read_bytes() == original
         tz = tar_zstd_compress_dir(corpus)
-        _record("A-unique_content", "PASS", len(archive), len(tz),
-                "200 lines each with random payload – fallback path")
+        _record(
+            "A-unique_content",
+            "PASS",
+            len(archive),
+            len(tz),
+            "200 lines each with random payload – fallback path",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -539,8 +583,13 @@ class TestAdversarial:
         original = (corpus / "random.bin").read_bytes()
         assert (out / "random.bin").read_bytes() == original, "Random data corruption!"
         tz = tar_zstd_compress_dir(corpus)
-        _record("B-random_data", "PASS", len(archive), len(tz),
-                "fully random binary – binary_fallback expected")
+        _record(
+            "B-random_data",
+            "PASS",
+            len(archive),
+            len(tz),
+            "fully random binary – binary_fallback expected",
+        )
 
     def test_nearly_identical_lines_template_detection(self, tmp_path):
         """Lines sharing the same template key should be deduplicated."""
@@ -554,8 +603,13 @@ class TestAdversarial:
         assert metrics["num_shared_templates"] >= 1
         assert metrics["template_reuse_rate"] > 0.5
         tz = tar_zstd_compress_dir(corpus)
-        _record("B-nearly_identical_lines", "PASS", len(archive), len(tz),
-                f"500 lines w/ same template; reuse_rate={metrics['template_reuse_rate']:.2f}")
+        _record(
+            "B-nearly_identical_lines",
+            "PASS",
+            len(archive),
+            len(tz),
+            f"500 lines w/ same template; reuse_rate={metrics['template_reuse_rate']:.2f}",
+        )
 
     def test_high_cardinality_no_crash(self, tmp_path):
         """High-cardinality log (no structural reuse) must not crash or corrupt."""
@@ -564,11 +618,17 @@ class TestAdversarial:
         out = tmp_path / "out"
         decompress_corpus_template(archive, out)
         original = (corpus / "highcard.log").read_bytes()
-        assert (out / "highcard.log").read_bytes() == original, \
-            "High-cardinality log corrupted!"
+        assert (
+            out / "highcard.log"
+        ).read_bytes() == original, "High-cardinality log corrupted!"
         tz = tar_zstd_compress_dir(corpus)
-        _record("B-high_cardinality", "PASS", len(archive), len(tz),
-                "unique lines – fallback expected; no crash")
+        _record(
+            "B-high_cardinality",
+            "PASS",
+            len(archive),
+            len(tz),
+            "unique lines – fallback expected; no crash",
+        )
 
     def test_truncated_archive_raises(self, tmp_path):
         """Truncated MCK archive must raise ValueError, not silently succeed."""
@@ -577,7 +637,9 @@ class TestAdversarial:
         truncated = archive[: len(archive) // 2]
         with pytest.raises((ValueError, Exception)):
             decompress_corpus_template(truncated, tmp_path / "out")
-        _record("B-truncated_archive", "PASS", notes="truncated archive → exception raised")
+        _record(
+            "B-truncated_archive", "PASS", notes="truncated archive → exception raised"
+        )
 
     def test_invalid_magic_raises(self, tmp_path):
         """Archive with wrong magic bytes must raise ValueError."""
@@ -596,7 +658,11 @@ class TestAdversarial:
         bad_archive = b"MCK\x00" + bytes([0x01]) + bad_payload
         with pytest.raises(Exception):
             decompress_corpus_template(bad_archive, tmp_path / "out3")
-        _record("B-broken_msgpack", "PASS", notes="corrupt msgpack payload → exception raised")
+        _record(
+            "B-broken_msgpack",
+            "PASS",
+            notes="corrupt msgpack payload → exception raised",
+        )
 
     def test_too_short_data_raises(self, tmp_path):
         """Fewer than 5 bytes must raise ValueError."""
@@ -620,8 +686,13 @@ class TestAdversarial:
         assert decompress_log(compressed) == data
         mode = get_compress_mode(compressed)
         assert mode == "raw", f"Expected raw mode for random data, got {mode}"
-        _record("B-log_random_fallback", "PASS", len(compressed), None,
-                "random bytes → log_template raw fallback")
+        _record(
+            "B-log_random_fallback",
+            "PASS",
+            len(compressed),
+            None,
+            "random bytes → log_template raw fallback",
+        )
 
     def test_no_silent_data_corruption(self, tmp_path):
         """Flip a bit in the payload and ensure decompression fails, not silently corrupts."""
@@ -637,8 +708,9 @@ class TestAdversarial:
             # If it somehow returns without error, verify it didn't silently
             # produce the original data (that would be a false negative).
             recovered = (tmp_path / "out6" / "a.log").read_bytes()
-            assert recovered != b"INFO x=1\n" * 20, \
-                "Silent data corruption: corrupt archive returned original data!"
+            assert (
+                recovered != b"INFO x=1\n" * 20
+            ), "Silent data corruption: corrupt archive returned original data!"
             status = "PASS"
             notes = "corrupt archive – data mismatch detected (no silent corruption)"
         except Exception:
@@ -663,8 +735,13 @@ class TestGeneralization:
         original = (corpus / "access.log").read_bytes()
         assert (out / "access.log").read_bytes() == original
         tz = tar_zstd_compress_dir(corpus)
-        _record("C-nginx_logs", "PASS", len(archive), len(tz),
-                f"1 000 nginx lines; tpl_reuse={metrics['template_reuse_rate']:.2f}")
+        _record(
+            "C-nginx_logs",
+            "PASS",
+            len(archive),
+            len(tz),
+            f"1 000 nginx lines; tpl_reuse={metrics['template_reuse_rate']:.2f}",
+        )
 
     def test_json_ndjson_round_trip(self, tmp_path):
         corpus = gen_json_corpus(tmp_path)
@@ -672,8 +749,9 @@ class TestGeneralization:
         out = tmp_path / "out"
         decompress_corpus_template(archive, out)
         for name in ["events.ndjson", "config.json"]:
-            assert (out / name).read_bytes() == (corpus / name).read_bytes(), \
-                f"Mismatch: {name}"
+            assert (out / name).read_bytes() == (
+                corpus / name
+            ).read_bytes(), f"Mismatch: {name}"
         tz = tar_zstd_compress_dir(corpus)
         _record("C-json_ndjson", "PASS", len(archive), len(tz), "NDJSON + JSON config")
 
@@ -683,11 +761,17 @@ class TestGeneralization:
         out = tmp_path / "out"
         decompress_corpus_template(archive, out)
         for name in ["nginx.log", "app.log", "data.ndjson", "readme.md"]:
-            assert (out / name).read_bytes() == (corpus / name).read_bytes(), \
-                f"Mismatch: {name}"
+            assert (out / name).read_bytes() == (
+                corpus / name
+            ).read_bytes(), f"Mismatch: {name}"
         tz = tar_zstd_compress_dir(corpus)
-        _record("C-mixed_formats", "PASS", len(archive), len(tz),
-                "nginx + app log + ndjson + markdown")
+        _record(
+            "C-mixed_formats",
+            "PASS",
+            len(archive),
+            len(tz),
+            "nginx + app log + ndjson + markdown",
+        )
 
     def test_precompressed_files_round_trip(self, tmp_path):
         """Already-compressed files (.gz, .zip) should round-trip as binary."""
@@ -696,14 +780,21 @@ class TestGeneralization:
         out = tmp_path / "out"
         decompress_corpus_template(archive, out)
         for name in ["archive.gz", "archive.zip", "normal.log"]:
-            assert (out / name).read_bytes() == (corpus / name).read_bytes(), \
-                f"Mismatch: {name}"
+            assert (out / name).read_bytes() == (
+                corpus / name
+            ).read_bytes(), f"Mismatch: {name}"
         # .gz and .zip are binary → binary_fallback_files should be ≥ 2
-        assert metrics["binary_fallback_files"] >= 2, \
-            "Pre-compressed files should trigger binary fallback"
+        assert (
+            metrics["binary_fallback_files"] >= 2
+        ), "Pre-compressed files should trigger binary fallback"
         tz = tar_zstd_compress_dir(corpus)
-        _record("C-precompressed", "PASS", len(archive), len(tz),
-                f"gz + zip + log; binary_fallback={metrics['binary_fallback_files']}")
+        _record(
+            "C-precompressed",
+            "PASS",
+            len(archive),
+            len(tz),
+            f"gz + zip + log; binary_fallback={metrics['binary_fallback_files']}",
+        )
 
     def test_fallback_triggers_for_random_only_corpus(self, tmp_path):
         """A corpus of only random binary data must fall back cleanly without crash."""
@@ -715,11 +806,18 @@ class TestGeneralization:
         out = tmp_path / "out"
         decompress_corpus_template(archive, out)
         for i in range(5):
-            assert (out / f"rand{i}.bin").read_bytes() == (corpus / f"rand{i}.bin").read_bytes()
+            assert (out / f"rand{i}.bin").read_bytes() == (
+                corpus / f"rand{i}.bin"
+            ).read_bytes()
         # All files should be binary fallback
         assert metrics["binary_fallback_files"] == 5
-        _record("C-all_binary_fallback", "PASS", len(archive), None,
-                "5 random-binary files → all binary_fallback")
+        _record(
+            "C-all_binary_fallback",
+            "PASS",
+            len(archive),
+            None,
+            "5 random-binary files → all binary_fallback",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -805,7 +903,9 @@ class TestRegressionGate:
     """Flag cases where MC is significantly worse than TAR+ZSTD."""
 
     @staticmethod
-    def _check_regression(corpus: Path, label: str, expected_low_structure: bool = False) -> None:
+    def _check_regression(
+        corpus: Path, label: str, expected_low_structure: bool = False
+    ) -> None:
         archive = compress_corpus_template(corpus)
         tz = tar_zstd_compress_dir(corpus)
         mc_size = len(archive)
@@ -843,29 +943,34 @@ class TestRegressionGate:
             for d in range(10)
         }
         corpus = _write_corpus(tmp_path, files)
-        self._check_regression(corpus, "E-regression_structured_logs",
-                               expected_low_structure=False)
+        self._check_regression(
+            corpus, "E-regression_structured_logs", expected_low_structure=False
+        )
 
     def test_regression_nginx_logs(self, tmp_path):
         """MC must not be worse than TAR+ZSTD on nginx-style access logs."""
         corpus = gen_nginx_logs(tmp_path)
-        self._check_regression(corpus, "E-regression_nginx",
-                               expected_low_structure=False)
+        self._check_regression(
+            corpus, "E-regression_nginx", expected_low_structure=False
+        )
 
     def test_regression_random_data(self, tmp_path):
         """Random data – MC may legitimately be larger (low structure, explainable)."""
         corpus = gen_random_data(tmp_path)
-        self._check_regression(corpus, "E-regression_random",
-                               expected_low_structure=True)
+        self._check_regression(
+            corpus, "E-regression_random", expected_low_structure=True
+        )
 
     def test_regression_json_corpus(self, tmp_path):
         """MC must not be significantly worse than TAR+ZSTD on JSON lines."""
         corpus = gen_json_corpus(tmp_path)
-        self._check_regression(corpus, "E-regression_json",
-                               expected_low_structure=False)
+        self._check_regression(
+            corpus, "E-regression_json", expected_low_structure=False
+        )
 
     def test_regression_mixed_formats(self, tmp_path):
         """Mixed-format corpus – moderate tolerance."""
         corpus = gen_mixed_formats(tmp_path)
-        self._check_regression(corpus, "E-regression_mixed",
-                               expected_low_structure=False)
+        self._check_regression(
+            corpus, "E-regression_mixed", expected_low_structure=False
+        )

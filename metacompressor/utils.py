@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Generator
+from collections.abc import Generator
 
 import xxhash
 
@@ -14,7 +14,9 @@ import xxhash
 CHUNK_SIZE = 4096
 
 
-def chunk_data(data: bytes, chunk_size: int = CHUNK_SIZE) -> Generator[bytes, None, None]:
+def chunk_data(
+    data: bytes, chunk_size: int = CHUNK_SIZE
+) -> Generator[bytes, None, None]:
     """Yield successive fixed-size chunks from *data*.
 
     The last chunk may be smaller than *chunk_size*.
@@ -123,6 +125,7 @@ def cdc_chunk_data(
 # ---------------------------------------------------------------------------
 # Chunk identity
 # ---------------------------------------------------------------------------
+
 
 def hash_chunk(chunk: bytes) -> str:
     """Return a hex digest string that uniquely identifies *chunk*."""

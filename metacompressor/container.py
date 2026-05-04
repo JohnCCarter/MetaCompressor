@@ -50,8 +50,10 @@ VERSION_DIR = 0x01
 @dataclass
 class MC1Container:
     chunk_size: int
-    chunks: Dict[int, bytes] = field(default_factory=dict)   # chunk_id → raw bytes (full chunks)
-    sequence: List[int] = field(default_factory=list)        # ordered chunk_ids
+    chunks: Dict[int, bytes] = field(
+        default_factory=dict
+    )  # chunk_id → raw bytes (full chunks)
+    sequence: List[int] = field(default_factory=list)  # ordered chunk_ids
     # chunk_id → (base_chunk_id, target_len, [[offset, byte], …])
     delta_chunks: Dict[int, tuple] = field(default_factory=dict)
     # CDC parameters (only meaningful when chunking_mode == "cdc")
@@ -73,8 +75,9 @@ def serialise(container: MC1Container) -> bytes:
     if container.delta_chunks:
         payload["delta_chunks"] = [
             [cid, base_cid, target_len, diffs]
-            for cid, (base_cid, target_len, diffs)
-            in sorted(container.delta_chunks.items())
+            for cid, (base_cid, target_len, diffs) in sorted(
+                container.delta_chunks.items()
+            )
         ]
     if container.chunking_mode == "cdc":
         payload["min_chunk_size"] = container.min_chunk_size
@@ -121,8 +124,14 @@ def deserialise(data: bytes) -> MC1Container:
     }
     if "delta_chunks" in payload:
         from metacompressor.delta import apply_delta
+
         for entry in payload["delta_chunks"]:
-            cid, base_cid, target_len, raw_diffs = entry[0], entry[1], entry[2], entry[3]
+            cid, base_cid, target_len, raw_diffs = (
+                entry[0],
+                entry[1],
+                entry[2],
+                entry[3],
+            )
             if base_cid not in chunks:
                 raise ValueError(
                     f"Delta chunk {cid} references unknown base chunk {base_cid}"
@@ -147,18 +156,20 @@ def deserialise(data: bytes) -> MC1Container:
 # Multi-file corpus container (.mc1dir)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FileEntry:
     """One file stored inside a .mc1dir archive."""
-    path: str                   # relative POSIX path
-    sequence: List[int]         # chunk_ids in original order
+
+    path: str  # relative POSIX path
+    sequence: List[int]  # chunk_ids in original order
 
 
 @dataclass
 class MC1DirContainer:
     chunk_size: int
     chunks: Dict[int, bytes] = field(default_factory=dict)  # shared full chunk dict
-    files: List[FileEntry] = field(default_factory=list)    # per-file entries
+    files: List[FileEntry] = field(default_factory=list)  # per-file entries
     # chunk_id → (base_chunk_id, target_len, [[offset, byte], …])
     delta_chunks: Dict[int, tuple] = field(default_factory=dict)
 
@@ -169,16 +180,14 @@ def serialise_dir(container: MC1DirContainer) -> bytes:
     payload = {
         "chunk_size": container.chunk_size,
         "chunks": [[cid, data] for cid, data in sorted_chunks],
-        "files": [
-            {"path": f.path, "sequence": f.sequence}
-            for f in container.files
-        ],
+        "files": [{"path": f.path, "sequence": f.sequence} for f in container.files],
     }
     if container.delta_chunks:
         payload["delta_chunks"] = [
             [cid, base_cid, target_len, diffs]
-            for cid, (base_cid, target_len, diffs)
-            in sorted(container.delta_chunks.items())
+            for cid, (base_cid, target_len, diffs) in sorted(
+                container.delta_chunks.items()
+            )
         ]
     raw = msgpack.packb(payload, use_bin_type=True)
     cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
@@ -212,8 +221,14 @@ def deserialise_dir(data: bytes) -> MC1DirContainer:
     }
     if "delta_chunks" in payload:
         from metacompressor.delta import apply_delta
+
         for entry in payload["delta_chunks"]:
-            cid, base_cid, target_len, raw_diffs = entry[0], entry[1], entry[2], entry[3]
+            cid, base_cid, target_len, raw_diffs = (
+                entry[0],
+                entry[1],
+                entry[2],
+                entry[3],
+            )
             if base_cid not in chunks:
                 raise ValueError(
                     f"Delta chunk {cid} references unknown base chunk {base_cid}"

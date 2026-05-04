@@ -1,0 +1,20 @@
+---
+description: Pytest and benchmark conventions for MetaCompressor
+globs:
+  - metacompressor/tests/**/*.py
+  - benchmarks/**/*.py
+alwaysApply: false
+---
+
+# Tests and benchmarks
+
+## Tests (`metacompressor/tests/`)
+
+- Prefer **round-trip** helpers (`compress` → `decompress`) for behavioral tests unless you are explicitly testing failure modes.
+- Respect pytest **markers** (`small`, `medium`, `large`); do not assume `large` runs in CI without `RUN_LARGE_TESTS=1`.
+- Reuse patterns from `conftest.py` and existing files in the same directory.
+
+## Benchmarks (`benchmarks/`)
+
+- Scripts here may be long-running or I/O heavy; do not fold their output into “expected” unit test assertions without a stable, documented contract.
+- When changing compression semantics, update or add **unit tests** first; benchmarks support validation, not the sole spec.

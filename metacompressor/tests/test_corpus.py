@@ -9,10 +9,10 @@ import pytest
 
 from metacompressor.corpus import compress_corpus, decompress_corpus
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_corpus(tmp_path: Path, files: dict[str, bytes]) -> Path:
     """Write *files* (relative-path → bytes) under *tmp_path* and return root."""
@@ -31,15 +31,13 @@ def round_trip_corpus(tmp_path: Path, files: dict[str, bytes]) -> dict[str, byte
     archive = compress_corpus(corpus_dir)
     out_dir = tmp_path / "recovered"
     decompress_corpus(archive, out_dir)
-    return {
-        rel.replace("\\", "/"): (out_dir / rel).read_bytes()
-        for rel in files
-    }
+    return {rel.replace("\\", "/"): (out_dir / rel).read_bytes() for rel in files}
 
 
 # ---------------------------------------------------------------------------
 # Round-trip tests
 # ---------------------------------------------------------------------------
+
 
 class TestCorpusRoundTrip:
     def test_single_file(self, tmp_path):
@@ -83,10 +81,11 @@ class TestCorpusRoundTrip:
 # Deduplication tests
 # ---------------------------------------------------------------------------
 
+
 class TestCorpusDeduplication:
     def test_identical_files_deduplicated(self, tmp_path):
         """Multiple files with the same content should compress tightly."""
-        shared_content = (b"shared chunk content " * 200)
+        shared_content = b"shared chunk content " * 200
         files = {f"copy{i}.dat": shared_content for i in range(10)}
         corpus_dir = make_corpus(tmp_path, files)
         archive = compress_corpus(corpus_dir)
@@ -98,7 +97,7 @@ class TestCorpusDeduplication:
         """Shared chunks across files should only be stored once."""
         # Use random data for common and unique parts so ZSTD cannot trivially
         # compress them; this makes the cross-file deduplication benefit visible.
-        common = os.urandom(4096 * 8)   # 8 chunks shared across all three files
+        common = os.urandom(4096 * 8)  # 8 chunks shared across all three files
         unique_a = os.urandom(4096 * 2)
         unique_b = os.urandom(4096 * 2)
         unique_c = os.urandom(4096 * 2)
@@ -112,6 +111,7 @@ class TestCorpusDeduplication:
 
         # Each file compressed independently with ZSTD (per-file baseline)
         import zstandard as zstd
+
         cctx = zstd.ZstdCompressor(level=3)
         zstd_total = sum(len(cctx.compress(d)) for d in files.values())
 
@@ -123,7 +123,9 @@ class TestCorpusDeduplication:
         """Simulate a log corpus where MC should outperform per-file ZSTD."""
         import zstandard as zstd
 
-        template = "2024-01-01T00:{mm:02d}:{ss:02d}Z INFO request id={i} path=/api/data\n"
+        template = (
+            "2024-01-01T00:{mm:02d}:{ss:02d}Z INFO request id={i} path=/api/data\n"
+        )
         files: dict[str, bytes] = {}
         for day in range(10):
             lines = [
@@ -145,6 +147,7 @@ class TestCorpusDeduplication:
 # Determinism
 # ---------------------------------------------------------------------------
 
+
 class TestCorpusDeterminism:
     def test_same_input_same_output(self, tmp_path):
         files = {"a.txt": b"hello " * 500, "b.txt": b"world " * 500}
@@ -156,6 +159,7 @@ class TestCorpusDeterminism:
 # ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
+
 
 class TestCorpusErrors:
     def test_not_a_directory(self, tmp_path):

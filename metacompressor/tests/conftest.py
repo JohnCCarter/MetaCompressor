@@ -9,7 +9,9 @@ def _large_tests_enabled() -> bool:
     return os.getenv("RUN_LARGE_TESTS") == "1"
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
     if _large_tests_enabled():
         return
     skip_large = pytest.mark.skip(reason="Skipping large tests; set RUN_LARGE_TESTS=1")

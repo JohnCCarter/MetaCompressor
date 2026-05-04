@@ -16,10 +16,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from metacompressor.container import (
-    MC1DirContainer,
     FileEntry,
-    serialise_dir,
+    MC1DirContainer,
     deserialise_dir,
+    serialise_dir,
 )
 from metacompressor.delta import delta_encoded_size, find_similar_chunk
 from metacompressor.utils import CHUNK_SIZE, chunk_data, hash_chunk
@@ -76,9 +76,7 @@ def compress_corpus(
     next_id = 0
 
     # Collect files in a deterministic order (sorted by relative path).
-    all_files = sorted(
-        p for p in input_dir.rglob("*") if p.is_file()
-    )
+    all_files = sorted(p for p in input_dir.rglob("*") if p.is_file())
 
     for file_path in all_files:
         rel_path = file_path.relative_to(input_dir).as_posix()
@@ -94,7 +92,9 @@ def compress_corpus(
 
                 # Attempt delta encoding against recent full chunks.
                 if use_delta:
-                    delta_result = find_similar_chunk(chunk, container.chunks, full_id_order)
+                    delta_result = find_similar_chunk(
+                        chunk, container.chunks, full_id_order
+                    )
                     if delta_result is not None:
                         base_id, diffs = delta_result
                         if delta_encoded_size(diffs) < len(chunk):

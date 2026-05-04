@@ -46,7 +46,11 @@ from metacompressor.corpus_template import (
 # ---------------------------------------------------------------------------
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
-_RESULTS_DIR = _REPO_ROOT / "results"
+_RESULTS_DIR = (
+    Path(os.environ["METACOMPRESSOR_TEST_RESULTS_DIR"])
+    if os.environ.get("METACOMPRESSOR_TEST_RESULTS_DIR")
+    else _REPO_ROOT / "results"
+)
 
 # Regression threshold: flag if MC is more than 10 % larger than TAR+ZSTD.
 _REGRESSION_THRESHOLD = 1.10
@@ -108,6 +112,7 @@ def _try_brotli_compress(data: bytes) -> Optional[int]:
     """Return brotli-compressed size, or None if brotli is unavailable."""
     try:
         import brotli  # type: ignore[import]
+
         return len(brotli.compress(data, quality=4))
     except ImportError:
         return None
@@ -143,7 +148,6 @@ def _alpha_id(n: int) -> str:
     return "".join(reversed(result))
 
 
-
 def _write_corpus(tmp: Path, files: Dict[str, bytes]) -> Path:
     corpus = tmp / "corpus"
     corpus.mkdir(parents=True, exist_ok=True)
@@ -165,8 +169,8 @@ def gen_structured_logs(tmp: Path, size_mb: int) -> Path:
 def gen_many_small_files(tmp: Path, n: int = 2000) -> Path:
     files = {
         f"logs/day{i:04d}.log": (
-            f"INFO event={i} status=200\nWARN event={i+1} code=429\n"
-            f"ERROR event={i+2} code=500\n"
+            f"INFO event={i} status=200\nWARN event={i + 1} code=429\n"
+            f"ERROR event={i + 2} code=500\n"
         ).encode()
         for i in range(n)
     }
@@ -192,11 +196,11 @@ def gen_mixed_app_logs(tmp: Path) -> Path:
                     ss=i % 60,
                     ms=i % 1000,
                     level=["INFO", "WARN", "ERROR"][i % 3],
-                    logger=f"app.module{i%5}",
-                    class_name=f"com.example.Service{i%4}",
+                    logger=f"app.module{i % 5}",
+                    class_name=f"com.example.Service{i % 4}",
                     pid=1000 + i % 50,
                     msg=f"request processed id={i}",
-                    comp=f"svc{i%8}",
+                    comp=f"svc{i % 8}",
                 )
             )
         return "".join(lines).encode()
@@ -244,10 +248,10 @@ def gen_large_ndjson(tmp: Path, n: int = 50_000) -> Path:
     """Large NDJSON stream."""
     lines = [
         (
-            f'{{"ts":"2024-01-15T{i//3600%24:02d}:{i//60%60:02d}:{i%60:02d}Z",'
-            f'"level":"{"INFO" if i%3==0 else ("WARN" if i%3==1 else "ERROR")}",'
-            f'"service":"svc{i%8}","req_id":{i},"latency_ms":{10 + i%500},'
-            f'"status":{[200,404,500,302][i%4]}}}\n'
+            f'{{"ts":"2024-01-15T{i // 3600 % 24:02d}:{i // 60 % 60:02d}:{i % 60:02d}Z",'
+            f'"level":"{"INFO" if i % 3 == 0 else ("WARN" if i % 3 == 1 else "ERROR")}",'
+            f'"service":"svc{i % 8}","req_id":{i},"latency_ms":{10 + i % 500},'
+            f'"status":{[200, 404, 500, 302][i % 4]}}}\n'
         ).encode()
         for i in range(n)
     ]
@@ -257,13 +261,49 @@ def gen_large_ndjson(tmp: Path, n: int = 50_000) -> Path:
 def gen_low_structure_prose(tmp: Path) -> Path:
     """Prose / natural language text – very low structural repetition."""
     words = [
-        "The", "quick", "brown", "fox", "jumps", "over", "the", "lazy", "dog",
-        "A", "large", "language", "model", "generates", "text", "by", "predicting",
-        "the", "next", "token", "given", "all", "preceding", "tokens", "in", "context",
-        "MetaCompressor", "uses", "template", "extraction", "to", "compress", "logs",
-        "efficiently", "by", "factoring", "out", "repeated", "structural", "patterns",
+        "The",
+        "quick",
+        "brown",
+        "fox",
+        "jumps",
+        "over",
+        "the",
+        "lazy",
+        "dog",
+        "A",
+        "large",
+        "language",
+        "model",
+        "generates",
+        "text",
+        "by",
+        "predicting",
+        "the",
+        "next",
+        "token",
+        "given",
+        "all",
+        "preceding",
+        "tokens",
+        "in",
+        "context",
+        "MetaCompressor",
+        "uses",
+        "template",
+        "extraction",
+        "to",
+        "compress",
+        "logs",
+        "efficiently",
+        "by",
+        "factoring",
+        "out",
+        "repeated",
+        "structural",
+        "patterns",
     ]
     import random
+
     rng = random.Random(42)
     sentences = []
     for i in range(2000):
@@ -277,7 +317,7 @@ def gen_high_cardinality_large(tmp: Path, n: int = 2000) -> Path:
     """Large high-cardinality log – recurring template, random variable values."""
     lines = [
         f"REQUEST id={i} session={os.urandom(8).hex()} "
-        f"user_agent={os.urandom(4).hex()} path=/api/v1/resource/{i%100}\n".encode()
+        f"user_agent={os.urandom(4).hex()} path=/api/v1/resource/{i % 100}\n".encode()
         for i in range(n)
     ]
     return _write_corpus(tmp, {"highcard.log": b"".join(lines)})
@@ -387,17 +427,19 @@ def _emit_hardening_report() -> None:
 
     crashes = [r for r in _H_RESULTS if r["status"] == "CRASH"]
     regressions = [
-        r for r in _H_RESULTS
-        if r.get("delta_pct") is not None and r["delta_pct"] > 10.0
+        r
+        for r in _H_RESULTS
+        if r.get("delta_pct") is not None
+        and r["delta_pct"] > 10.0
         and r["status"] not in ("CRASH", "SKIP")
     ]
     mc_wins = [
-        r for r in _H_RESULTS
+        r
+        for r in _H_RESULTS
         if r.get("delta_pct") is not None and r["delta_pct"] < -5.0
     ]
     mc_losses = [
-        r for r in _H_RESULTS
-        if r.get("delta_pct") is not None and r["delta_pct"] > 5.0
+        r for r in _H_RESULTS if r.get("delta_pct") is not None and r["delta_pct"] > 5.0
     ]
 
     if crashes:
@@ -431,13 +473,17 @@ def _emit_hardening_report() -> None:
         pm = _hfmt(r["peak_mem_mb"], ".1f", " MB")
 
         # Determine winner
-        sizes = {k: v for k, v in {
-            "MC": r["mc_size"],
-            "TAR+ZSTD": r["tarzstd_size"],
-            "per-file-zstd": r["per_file_zstd_size"],
-            "gzip": r["gzip_size"],
-            "brotli": r["brotli_size"],
-        }.items() if v is not None}
+        sizes = {
+            k: v
+            for k, v in {
+                "MC": r["mc_size"],
+                "TAR+ZSTD": r["tarzstd_size"],
+                "per-file-zstd": r["per_file_zstd_size"],
+                "gzip": r["gzip_size"],
+                "brotli": r["brotli_size"],
+            }.items()
+            if v is not None
+        }
         if sizes:
             winner = min(sizes, key=lambda k: sizes[k])  # type: ignore[arg-type]
         else:
@@ -653,7 +699,9 @@ class TestLargeStructuredLogs:
         decompress_s = time.perf_counter() - t1
 
         assert (out / "large.log").read_bytes() == (corpus / "large.log").read_bytes()
-        assert peak_mb < 128.0, f"50 MB structured corpus peak memory regression: {peak_mb:.1f} MB"
+        assert (
+            peak_mb < 128.0
+        ), f"50 MB structured corpus peak memory regression: {peak_mb:.1f} MB"
 
         tz = tar_zstd_compress_dir(corpus)
         pf = per_file_zstd_compress_dir(corpus)
@@ -667,7 +715,7 @@ class TestLargeStructuredLogs:
 
         notes = (
             f"50 MB structured log; tpl_reuse={metrics['template_reuse_rate']:.2f}; "
-            f"ratio={len(archive)/raw_size:.5f}"
+            f"ratio={len(archive) / raw_size:.5f}"
         )
         _h_record(
             "H-50mb_structured",
@@ -721,7 +769,7 @@ class TestLargeStructuredLogs:
 
         notes = (
             f"100 MB structured log; tpl_reuse={metrics['template_reuse_rate']:.2f}; "
-            f"ratio={len(archive)/raw_size:.6f}"
+            f"ratio={len(archive) / raw_size:.6f}"
         )
         _h_record(
             "H-100mb_structured",
@@ -817,7 +865,9 @@ class TestMixedAppLogs:
         decompress_s = time.perf_counter() - t1
 
         for name in ["django.log", "java.log", "syslog.log", "logrus.log"]:
-            assert (out / name).read_bytes() == (corpus / name).read_bytes(), f"Mismatch: {name}"
+            assert (out / name).read_bytes() == (
+                corpus / name
+            ).read_bytes(), f"Mismatch: {name}"
 
         tz = tar_zstd_compress_dir(corpus)
         pf = per_file_zstd_compress_dir(corpus)
@@ -927,7 +977,9 @@ class TestLargeNDJSON:
         decompress_corpus_template(archive, out)
         decompress_s = time.perf_counter() - t1
 
-        assert (out / "events.ndjson").read_bytes() == (corpus / "events.ndjson").read_bytes()
+        assert (out / "events.ndjson").read_bytes() == (
+            corpus / "events.ndjson"
+        ).read_bytes()
 
         tz = tar_zstd_compress_dir(corpus)
         pf = per_file_zstd_compress_dir(corpus)
@@ -1120,7 +1172,9 @@ class TestHighCardinalityLarge:
         archive, metrics = compress_corpus_template_with_metrics(corpus)
         out = tmp_path / "out"
         decompress_corpus_template(archive, out)
-        assert (out / "highcard.log").read_bytes() == (corpus / "highcard.log").read_bytes()
+        assert (out / "highcard.log").read_bytes() == (
+            corpus / "highcard.log"
+        ).read_bytes()
 
         tz = tar_zstd_compress_dir(corpus)
         pf = per_file_zstd_compress_dir(corpus)
@@ -1173,9 +1227,13 @@ class TestBinaryAndPrecompressed:
         decompress_corpus_template(archive, out)
 
         for name in ["bin1.bin", "bin2.bin", "structured.log", "json.ndjson"]:
-            assert (out / name).read_bytes() == (corpus / name).read_bytes(), f"Mismatch: {name}"
+            assert (out / name).read_bytes() == (
+                corpus / name
+            ).read_bytes(), f"Mismatch: {name}"
 
-        assert metrics["binary_fallback_files"] >= 2, "Binary files should trigger binary fallback"
+        assert (
+            metrics["binary_fallback_files"] >= 2
+        ), "Binary files should trigger binary fallback"
 
         tz = tar_zstd_compress_dir(corpus)
         pf = per_file_zstd_compress_dir(corpus)
@@ -1204,7 +1262,9 @@ class TestBinaryAndPrecompressed:
         decompress_corpus_template(archive, out)
 
         for name in ["archive.gz", "archive.zst", "normal1.log", "normal2.log"]:
-            assert (out / name).read_bytes() == (corpus / name).read_bytes(), f"Mismatch: {name}"
+            assert (out / name).read_bytes() == (
+                corpus / name
+            ).read_bytes(), f"Mismatch: {name}"
 
         tz = tar_zstd_compress_dir(corpus)
         pf = per_file_zstd_compress_dir(corpus)
@@ -1260,7 +1320,7 @@ class TestFallbackCorrectness:
         """Files with 0 recurring templates must round-trip via hybrid fallback."""
         # Lines that look structured but never repeat the same template globally
         lines = [
-            f"MSG{i} type=X attr={i*3} flag={i%2} payload=xyz{i}\n"
+            f"MSG{i} type=X attr={i * 3} flag={i % 2} payload=xyz{i}\n"
             for i in range(50)
         ]
         content = "".join(lines).encode()
@@ -1400,6 +1460,7 @@ class TestHardeningRegressionGate:
     def test_regression_random_binary(self, tmp_path):
         """Random binary – explainable if MC loses."""
         from metacompressor.tests.test_stress_suite import gen_random_data
+
         corpus = gen_random_data(tmp_path)
         self._check(corpus, "H-reg_random_binary", expected_low_structure=True)
 
@@ -1474,7 +1535,9 @@ def _measure_xlarge(tmp_path: Path, size_mb: int, label: str) -> None:
     # Integrity: spot-check first and last 1 KB of the decompressed file.
     original = (corpus / "large.log").read_bytes()
     recovered = (out / "large.log").read_bytes()
-    assert recovered == original, f"{label}: round-trip mismatch for {size_mb} MB corpus"
+    assert (
+        recovered == original
+    ), f"{label}: round-trip mismatch for {size_mb} MB corpus"
 
     tz_size = metrics["tarzstd_size"]
     chose_fb = metrics["chose_raw_fallback"]
@@ -1486,7 +1549,7 @@ def _measure_xlarge(tmp_path: Path, size_mb: int, label: str) -> None:
 
     notes = (
         f"{size_mb} MB structured log; tpl_reuse={metrics['template_reuse_rate']:.2f}; "
-        f"ratio={len(archive)/raw_size:.6f}; peak_mem={peak_mb:.0f} MB; "
+        f"ratio={len(archive) / raw_size:.6f}; peak_mem={peak_mb:.0f} MB; "
         f"raw_fb={chose_fb}"
     )
     _h_record(

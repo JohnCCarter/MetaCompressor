@@ -15,6 +15,8 @@ def decompress(mc1_data: bytes) -> bytes:
     parts: list[bytes] = []
     for cid in container.sequence:
         if cid not in container.chunks:
-            raise ValueError(f"Corrupt container: chunk_id {cid} not found in dictionary")
+            raise ValueError(
+                f"Corrupt container: chunk_id {cid} not found in dictionary"
+            )
         parts.append(container.chunks[cid])
     return b"".join(parts)

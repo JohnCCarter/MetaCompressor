@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 import sys
+from pathlib import Path
 
-
-_MODULE_PATH = Path(__file__).resolve().parents[2] / "benchmarks" / "production_validation.py"
+_MODULE_PATH = (
+    Path(__file__).resolve().parents[2] / "benchmarks" / "production_validation.py"
+)
 _SPEC = importlib.util.spec_from_file_location("mc_production_validation", _MODULE_PATH)
 if _SPEC is None or _SPEC.loader is None:
     raise RuntimeError("Unable to load production_validation module")
@@ -41,7 +42,10 @@ def test_build_final_verdict_confirmed():
             "mc_summary": {"delta_vs_tar_zstd_pct": -10.5},
         },
     ]
-    assert production_validation._build_final_verdict(results) == "PRODUCTION_EDGE_CONFIRMED"
+    assert (
+        production_validation._build_final_verdict(results)
+        == "PRODUCTION_EDGE_CONFIRMED"
+    )
 
 
 def test_build_final_verdict_partial_on_structured_regression():
@@ -62,7 +66,9 @@ def test_build_final_verdict_partial_on_structured_regression():
             "mc_summary": {"delta_vs_tar_zstd_pct": 12.0},
         },
     ]
-    assert production_validation._build_final_verdict(results) == "PRODUCTION_EDGE_PARTIAL"
+    assert (
+        production_validation._build_final_verdict(results) == "PRODUCTION_EDGE_PARTIAL"
+    )
 
 
 def test_run_validation_writes_reports_for_small_fixture(tmp_path, monkeypatch):
@@ -95,7 +101,9 @@ def test_run_validation_writes_reports_for_small_fixture(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(production_validation, "_brotli_available", lambda: False)
 
-    payload = production_validation.run_validation(output_dir=tmp_path, include_very_large=False)
+    payload = production_validation.run_validation(
+        output_dir=tmp_path, include_very_large=False
+    )
 
     assert payload["correctness_passed"] is True
     assert payload["determinism_passed"] is True

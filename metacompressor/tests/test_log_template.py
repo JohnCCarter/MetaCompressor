@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from metacompressor.log_template import (
@@ -13,10 +11,10 @@ from metacompressor.log_template import (
     get_compress_mode,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def round_trip(data: bytes) -> bytes:
     return decompress_log(compress_log(data))
@@ -25,6 +23,7 @@ def round_trip(data: bytes) -> bytes:
 # ---------------------------------------------------------------------------
 # Round-trip (lossless) tests
 # ---------------------------------------------------------------------------
+
 
 class TestRoundTrip:
     def test_empty(self):
@@ -39,7 +38,7 @@ class TestRoundTrip:
         assert round_trip(data) == data
 
     def test_repeated_identical_lines(self):
-        data = (b"ERROR user=123 latency=45ms\n" * 50)
+        data = b"ERROR user=123 latency=45ms\n" * 50
         assert round_trip(data) == data
 
     def test_two_templates(self):
@@ -66,12 +65,16 @@ class TestRoundTrip:
         assert round_trip(data) == data
 
     def test_floats_in_template(self):
-        lines = [f"METRIC cpu={99.5 - i * 0.1:.1f} mem={i * 1.5:.1f}\n" for i in range(30)]
+        lines = [
+            f"METRIC cpu={99.5 - i * 0.1:.1f} mem={i * 1.5:.1f}\n" for i in range(30)
+        ]
         data = "".join(lines).encode()
         assert round_trip(data) == data
 
     def test_ip_addresses(self):
-        lines = [f"CONN src=192.168.1.{i} dst=10.0.0.1 port={1024+i}\n" for i in range(50)]
+        lines = [
+            f"CONN src=192.168.1.{i} dst=10.0.0.1 port={1024 + i}\n" for i in range(50)
+        ]
         data = "".join(lines).encode()
         assert round_trip(data) == data
 
@@ -120,6 +123,7 @@ class TestRoundTrip:
 # ---------------------------------------------------------------------------
 # Template mode selection
 # ---------------------------------------------------------------------------
+
 
 class TestTemplateMode:
     def test_recurring_lines_use_template_mode(self):
@@ -170,10 +174,7 @@ class TestTemplateMode:
         encoding, so compress_log falls back to raw mode.  Lossless
         round-trip is the invariant that must always hold.
         """
-        data = (
-            b"ERROR user=123 latency=45ms\n"
-            b"ERROR user=456 latency=30ms\n"
-        )
+        data = b"ERROR user=123 latency=45ms\nERROR user=456 latency=30ms\n"
         compressed = compress_log(data)
         assert round_trip(data) == data
         # At this tiny size raw mode is cheaper; template mode kicks in once
@@ -184,6 +185,7 @@ class TestTemplateMode:
 # ---------------------------------------------------------------------------
 # Extended tokeniser – new variable types
 # ---------------------------------------------------------------------------
+
 
 class TestExtendedTokenizer:
     """Round-trip tests for each variable type recognised by the extended tokeniser."""
@@ -197,15 +199,19 @@ class TestExtendedTokenizer:
     def test_uuid_template_mode(self):
         # Verify UUID is extracted as a single variable token (not split).
         from metacompressor.log_template import _tokenize
+
         uuid = "550e8400-e29b-41d4-a716-446655440000"
         line = f"REQUEST id={uuid} status=200"
         tkey, values = _tokenize(line)
-        assert uuid in values, f"UUID should be extracted as one variable; got values={values}"
+        assert (
+            uuid in values
+        ), f"UUID should be extracted as one variable; got values={values}"
         # Template skeleton should not contain the UUID digits.
         assert uuid not in "".join(tkey)
 
     def test_uuid_varying_round_trip(self):
         import random
+
         rng = random.Random(0)
 
         def _uuid():
@@ -236,7 +242,10 @@ class TestExtendedTokenizer:
         assert round_trip(data) == data
 
     def test_iso_datetime_with_fractional_seconds(self):
-        lines = [f"2024-03-01T12:00:{i:02d}.{i*10:03d}Z METRIC value={i}\n" for i in range(30)]
+        lines = [
+            f"2024-03-01T12:00:{i:02d}.{i * 10:03d}Z METRIC value={i}\n"
+            for i in range(30)
+        ]
         data = "".join(lines).encode()
         assert round_trip(data) == data
 
@@ -246,39 +255,49 @@ class TestExtendedTokenizer:
         assert round_trip(data) == data
 
     def test_ipv4_round_trip(self):
-        lines = [f"CONN src=192.168.1.{i} dst=10.0.0.1 port={1024+i}\n" for i in range(50)]
+        lines = [
+            f"CONN src=192.168.1.{i} dst=10.0.0.1 port={1024 + i}\n" for i in range(50)
+        ]
         data = "".join(lines).encode()
         assert round_trip(data) == data
 
     def test_ipv4_with_port_round_trip(self):
-        lines = [f"CONNECT 10.0.0.{i}:{8000+i} method=GET\n" for i in range(50)]
+        lines = [f"CONNECT 10.0.0.{i}:{8000 + i} method=GET\n" for i in range(50)]
         data = "".join(lines).encode()
         assert round_trip(data) == data
 
     def test_ipv4_template_shared(self):
         # Verify IPv4 is extracted as a single variable token.
         from metacompressor.log_template import _tokenize
+
         line = "CONN src=192.168.1.42 dst=10.0.0.1 port=8080"
         tkey, values = _tokenize(line)
-        assert "192.168.1.42" in values, f"IPv4 should be extracted as one variable; got values={values}"
+        assert (
+            "192.168.1.42" in values
+        ), f"IPv4 should be extracted as one variable; got values={values}"
         assert "10.0.0.1" in values
 
     def test_hex_0x_round_trip(self):
-        lines = [f"ADDR ptr=0x{i:08X} val=0x{i*2:04x}\n" for i in range(50)]
+        lines = [f"ADDR ptr=0x{i:08X} val=0x{i * 2:04x}\n" for i in range(50)]
         data = "".join(lines).encode()
         assert round_trip(data) == data
 
     def test_hex_0x_template_mode(self):
         # Verify 0x-hex strings are extracted as single variable tokens.
         from metacompressor.log_template import _tokenize
+
         line = "ADDR ptr=0xDEADBEEF size=64"
         tkey, values = _tokenize(line)
-        assert "0xDEADBEEF" in values, f"Hex 0x token should be extracted; got values={values}"
+        assert (
+            "0xDEADBEEF" in values
+        ), f"Hex 0x token should be extracted; got values={values}"
         assert "0xDEADBEEF" not in "".join(tkey)
 
     def test_url_round_trip(self):
         paths = ["/api/v1", "/health", "/metrics", "/status", "/debug"]
-        lines = [f"GET https://example.com{paths[i % len(paths)]} 200\n" for i in range(50)]
+        lines = [
+            f"GET https://example.com{paths[i % len(paths)]} 200\n" for i in range(50)
+        ]
         data = "".join(lines).encode()
         assert round_trip(data) == data
 
@@ -299,7 +318,7 @@ class TestExtendedTokenizer:
     def test_mixed_token_types_round_trip(self):
         uuid = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
         lines = [
-            f"2024-01-{i+1:02d}T10:00:00Z REQUEST id={uuid} src=192.168.1.{i} "
+            f"2024-01-{i + 1:02d}T10:00:00Z REQUEST id={uuid} src=192.168.1.{i} "
             f"ptr=0x{i:04x} status={200 + i % 3}\n"
             for i in range(30)
         ]
@@ -307,8 +326,12 @@ class TestExtendedTokenizer:
         assert round_trip(data) == data
 
     def test_timestamp_only_round_trip(self):
-        lines = [f"{h:02d}:{m:02d}:{s:02d} INFO ok\n"
-                 for h in range(3) for m in range(10) for s in range(2)]
+        lines = [
+            f"{h:02d}:{m:02d}:{s:02d} INFO ok\n"
+            for h in range(3)
+            for m in range(10)
+            for s in range(2)
+        ]
         data = "".join(lines).encode()
         assert round_trip(data) == data
 
@@ -322,6 +345,7 @@ class TestExtendedTokenizer:
 # ---------------------------------------------------------------------------
 # Determinism
 # ---------------------------------------------------------------------------
+
 
 class TestDeterminism:
     def test_same_input_same_output(self):
@@ -338,6 +362,7 @@ class TestDeterminism:
 # ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
+
 
 class TestErrorHandling:
     def test_corrupt_magic(self):

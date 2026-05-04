@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from argparse import Namespace
 
-import pytest
-
 from metacompressor.cli import cmd_compare_dir, format_delta
 
 
