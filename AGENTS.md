@@ -114,3 +114,14 @@ When documents or instructions conflict, use this order **from strongest to weak
 - `.github/workflows/ci.yml` — automated checks (layout, Ruff, Black, pytest).
 
 There is **no** `.github/copilot-instructions.md`, **no** `docs/OPUS_46_GOVERNANCE.md`, and **no** `.github/skills/*.json` in this repo; add them to this list **and** to section 9 if you introduce equivalents later.
+
+## Cursor Cloud specific instructions
+
+This is a self-contained Python library with **no external services** (no databases, Docker, or APIs). The update script runs `pip install -e ".[dev]"` which installs the package in editable mode with all dev tooling.
+
+**Caveats:**
+- Use `python3` (not `python`) — the VM may not have a `python` symlink.
+- Standard dev commands are documented in `README.md` and the `.cursor/rules/metacompressor-workflow.mdc` rule. Refer to those for lint (`ruff check`), format check (`black --check`), test (`python3 -m pytest metacompressor/tests -q`), and CLI (`mc --help`) commands.
+- 8 tests are routinely skipped (marker-gated `medium`/`large` tests or optional-dependency tests); this is normal.
+- Use `-m small` for a faster subset; `medium`/`large` markers require explicit opt-in (`RUN_LARGE_TESTS=1` for large).
+- Temp/scratch files go in `mc_test_output/` or `tmp_*` (gitignored). Never commit generated blobs.
