@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
+import multiprocessing
 import os
-import signal
 import sys
 import tempfile
 import time
@@ -209,25 +208,57 @@ def _dataset_timeout_seconds(spec: DatasetSpec) -> int:
     return _DATASET_TIMEOUTS_S.get(spec.name, _DEFAULT_DATASET_TIMEOUT_S)
 
 
-@contextlib.contextmanager
-def _dataset_time_limit(timeout_s: int):
-    if timeout_s <= 0 or os.name != "posix":
-        yield
-        return
-
-    def _handle_timeout(signum, frame):
-        raise TimeoutError("exceeded %ds time budget" % timeout_s)
-
-    previous_handler = signal.getsignal(signal.SIGALRM)
-    signal.signal(signal.SIGALRM, _handle_timeout)
-    previous_timer = signal.setitimer(signal.ITIMER_REAL, timeout_s)
+def _measure_dataset_worker(
+    spec: DatasetSpec,
+    dataset_dir_str: str,
+    work_dir_str: str,
+    queue: "multiprocessing.queues.Queue[Dict[str, Any]]",
+) -> None:
+    dataset_dir = Path(dataset_dir_str)
+    work_dir = Path(work_dir_str)
     try:
-        yield
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
-        if previous_timer != (0.0, 0.0):
-            signal.setitimer(signal.ITIMER_REAL, previous_timer[0], previous_timer[1])
+        _build_dataset(dataset_dir, spec)
+        queue.put(
+            {"result": _finalize_dataset_result(_measure_dataset(dataset_dir, spec, work_dir))}
+        )
+    except ValidationError as exc:
+        queue.put({"validation_error": str(exc)})
+    except Exception as exc:
+        queue.put({"error": str(exc)})
+
+
+def _run_dataset_with_timeout(tmp_root: Path, spec: DatasetSpec, timeout_s: int) -> Dict[str, Any]:
+    dataset_dir = tmp_root / "datasets" / spec.name
+    work_dir = tmp_root / "work" / spec.name
+    work_dir.mkdir(parents=True, exist_ok=True)
+    ctx = multiprocessing.get_context("fork") if os.name == "posix" else multiprocessing.get_context()
+    queue = ctx.Queue()
+    process = ctx.Process(
+        target=_measure_dataset_worker,
+        args=(spec, str(dataset_dir), str(work_dir), queue),
+    )
+    process.start()
+    process.join(timeout_s if timeout_s > 0 else None)
+
+    if process.is_alive():
+        process.terminate()
+        process.join()
+        queue.close()
+        return _skipped_dataset_result(spec, "skipped: exceeded %ds time budget" % timeout_s)
+
+    if queue.empty():
+        queue.close()
+        raise RuntimeError(
+            "dataset %s failed without a result (exit code %s)" % (spec.name, process.exitcode)
+        )
+
+    payload = queue.get()
+    queue.close()
+    if "result" in payload:
+        return payload["result"]
+    if "validation_error" in payload:
+        raise ValidationError(payload["validation_error"])
+    raise RuntimeError("dataset %s failed: %s" % (spec.name, payload["error"]))
 
 
 def _skipped_dataset_result(spec: DatasetSpec, reason: str) -> Dict[str, Any]:
@@ -514,18 +545,8 @@ def run_validation(output_dir: Optional[Path] = None, include_500mb: Optional[bo
             if skip_reason is not None:
                 dataset_results.append(_skipped_dataset_result(spec, skip_reason))
                 continue
-            dataset_dir = tmp_root / "datasets" / spec.name
-            work_dir = tmp_root / "work" / spec.name
-            work_dir.mkdir(parents=True, exist_ok=True)
             timeout_s = _dataset_timeout_seconds(spec)
-            try:
-                with _dataset_time_limit(timeout_s):
-                    _build_dataset(dataset_dir, spec)
-                    dataset_results.append(_finalize_dataset_result(_measure_dataset(dataset_dir, spec, work_dir)))
-            except TimeoutError as exc:
-                dataset_results.append(
-                    _skipped_dataset_result(spec, "skipped: %s" % exc)
-                )
+            dataset_results.append(_run_dataset_with_timeout(tmp_root, spec, timeout_s))
 
     final_verdict = _build_final_verdict(dataset_results)
     completed_results = _completed_results(dataset_results)
