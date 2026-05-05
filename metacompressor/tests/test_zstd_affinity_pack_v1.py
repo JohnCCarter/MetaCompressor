@@ -36,16 +36,18 @@ from metacompressor.corpus import (
 from metacompressor.decompressor import decompress
 from metacompressor.utils import CHUNK_SIZE
 from metacompressor.zstd_affinity_pack_v1 import (
+    MCZ1_MAGIC,
     is_zstd_affinity_v1_payload,
     unpack_mc1dir_payload,
 )
 
 
-def test_default_mc1_payload_is_msgpack_not_mcz1() -> None:
+def test_default_mc1_payload_is_short_msgpack_not_mcz1() -> None:
     data = os.urandom(CHUNK_SIZE * 2 + 17)
     mc1 = compress(data, chunking_mode=CHUNKING_FIXED)
     raw = zstd.ZstdDecompressor().decompress(mc1[5:])
     assert not is_zstd_affinity_v1_payload(raw)
+    assert raw[0] != 0xDE and raw[:4] != MCZ1_MAGIC
 
 
 def test_deserialise_accepts_mcz1_wire() -> None:

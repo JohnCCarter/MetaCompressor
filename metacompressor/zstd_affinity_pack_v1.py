@@ -303,4 +303,7 @@ def payload_includes_delta_chunks(raw: bytes) -> bool:
         payload = msgpack.unpackb(raw, raw=False)
     except Exception:
         return False
-    return "delta_chunks" in payload and len(payload.get("delta_chunks", [])) > 0
+    from metacompressor.mc1_msgpack_short import K_DELTA_CHUNKS
+
+    dc = payload.get("delta_chunks", payload.get(K_DELTA_CHUNKS, []))
+    return len(dc) > 0
