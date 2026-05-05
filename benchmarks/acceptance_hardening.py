@@ -527,6 +527,16 @@ def _build_markdown_report(
         "",
         "## Win-rate summary",
         "",
+        "- **Win-rate scope:** The strong-win ratio and the "
+        '"MC did not beat TAR+ZSTD on most structured log datasets" '
+        "verdict count only **structured-edge** datasets: %s."
+        % (", ".join(_STRUCTURED_EDGE_DATASET_NAMES)),
+        "- **Excluded from that ratio (still in the table):** "
+        "`structured_scale_*` scale rows — they feed **required-scale** "
+        "skip rules in the final verdict. `noisy_low_structure_logs` is "
+        "low-structure (`structured=false`) and is excluded from the "
+        "structured win-rate ratio.",
+        "",
         "- Structured strong wins (>=10%% vs TAR+ZSTD): %d/%d"
         % (len(strong_wins), len(structured_results)),
         "- Strong-win datasets: %s"

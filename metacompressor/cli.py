@@ -328,10 +328,33 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     print(f"  Encoded columns     : {metrics['num_encoded_columns']:,}")
     print(f"  Raw column fallback : {metrics['raw_column_fallback_count']:,}")
     print(f"  Column encodings    : {metrics['column_encoding_counts']}")
+    print(f"  Columnar v2 enabled : {metrics.get('columnar_v2_enabled', False)}")
+    print(f"  Encoding candidates : {metrics.get('column_encoding_candidates', 0):,}")
+    print(
+        f"  Selected (copy)     : {metrics.get('column_encoding_selected_counts', {})}"
+    )
+    print(
+        f"  Col v2 save vs v1   : {metrics.get('columnar_v2_savings_vs_v1_columns', 0):,} bytes (column msgpack only)"
+    )
+    print(
+        f"  Dict / RLE / Δ / VI cols: {metrics.get('dict_encoded_columns', 0)} / "
+        f"{metrics.get('rle_encoded_columns', 0)} / "
+        f"{metrics.get('delta_encoded_columns', 0)} / "
+        f"{metrics.get('varint_encoded_columns', 0)}"
+    )
+    print(f"  Columnar v1 (hypoth.): {metrics.get('columnar_v1_size', 0):,} bytes")
     print(f"  Columnar size       : {columnar_size:,}")
     print(f"  Row mode size       : {row_mode_size:,}")
     print(f"  Columnar vs row     : {metrics['columnar_savings_vs_row']:,} bytes")
     print(f"  Final selected mode : {metrics['final_selected_mode']}")
+    print(f"  Adaptive selected   : {metrics.get('selected_mode', '')}")
+    print(f"  Candidate sizes     : {metrics.get('candidate_sizes', {})}")
+    print(
+        f"  Savings vs TAR ZSTD / row / col: "
+        f"{metrics.get('savings_vs_tar_zstd_bytes', 0):,} / "
+        f"{metrics.get('savings_vs_row_bytes', 0):,} / "
+        f"{metrics.get('savings_vs_columnar_bytes', 0):,} bytes"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

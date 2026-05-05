@@ -81,6 +81,7 @@ def test_run_validation_writes_reports_for_small_fixture(tmp_path, monkeypatch):
         encoding="utf-8"
     )
     assert "## Win-rate summary" in markdown
+    assert "Win-rate scope" in markdown
     assert "## Speed/memory summary" in markdown
     assert "## Trust/correctness summary" in markdown
     assert "## Remaining weak zones" in markdown
