@@ -26,6 +26,7 @@ def _bench(name: str, files: Dict[str, bytes], profile: str) -> Dict[str, object
     _, m23 = compress_corpus_template_with_metrics(
         root, adaptive="v2.3", profile=profile
     )
+    v23_meta = (m23.get("predictive_v2") or {}).get("v23") or {}
     return {
         "dataset": name,
         "profile": profile,
@@ -41,10 +42,12 @@ def _bench(name: str, files: Dict[str, bytes], profile: str) -> Dict[str, object
         / max(1, int(m23["tarzstd_size"])),
         "v23_time": float(m23["timing"]["total_s"]),
         "v23_mode": m23["selected_mode"],
-        "v23_ranked": (
-            ((m23.get("predictive_v2") or {}).get("v23") or {}).get("ranked_candidates")
-            or []
-        ),
+        "v23_ranked": (v23_meta.get("ranked_candidates") or []),
+        "v23_built": int(v23_meta.get("built_candidate_count", 0)),
+        "v23_top1": bool(v23_meta.get("top1_correct", False)),
+        "v23_top2": bool(v23_meta.get("top2_correct", False)),
+        "v23_features": (m23.get("predictive_v2") or {}).get("feature_values", {}),
+        "v23_strategy_scores": v23_meta.get("strategy_scores", {}),
     }
 
 
@@ -86,6 +89,9 @@ def main() -> None:
     v23_worst = max(0.0, max(float(r["v23_delta"]) for r in rows))
     v22_time = sum(float(r["v22_time"]) for r in rows) / n
     v23_time = sum(float(r["v23_time"]) for r in rows) / n
+    v23_top1_acc = 100.0 * sum(1 for r in rows if bool(r["v23_top1"])) / n
+    v23_top2_acc = 100.0 * sum(1 for r in rows if bool(r["v23_top2"])) / n
+    v23_avg_built = sum(int(r["v23_built"]) for r in rows) / n
     lines = [
         "# v2.2 vs v2.3 predictive+profiles benchmark",
         "",
@@ -98,16 +104,24 @@ def main() -> None:
         f"| `v2.2` | {100.0 * v22_win / n:.1f}% | {v22_avg:.2f}% | {v22_worst:.2f}% | {v22_time:.4f}s |",
         f"| `v2.3` | {100.0 * v23_win / n:.1f}% | {v23_avg:.2f}% | {v23_worst:.2f}% | {v23_time:.4f}s |",
         "",
+        f"- v2.3 top-1 accuracy: **{v23_top1_acc:.1f}%**",
+        f"- v2.3 top-2 accuracy: **{v23_top2_acc:.1f}%**",
+        f"- v2.3 avg candidates built: **{v23_avg_built:.2f}**",
+        "",
         "## Per dataset",
         "",
-        "| Dataset | Profile | v2.2 mode | v2.2 delta | v2.2 time | v2.3 mode | v2.3 delta | v2.3 time | Ranked (v2.3) |",
-        "| ------- | ------- | --------- | ---------: | --------: | --------- | ---------: | --------: | ------------- |",
+        "| Dataset | Profile | v2.2 mode | v2.2 delta | v2.2 time | v2.3 mode | v2.3 delta | v2.3 time | Built | Top1 | Top2 | Ranked (v2.3) | Features (v2.3) | Strategy scores (v2.3) |",
+        "| ------- | ------- | --------- | ---------: | --------: | --------- | ---------: | --------: | ----: | ----: | ----: | ------------- | --------------- | ---------------------- |",
     ]
     for r in rows:
         lines.append(
             f"| {r['dataset']} | `{r['profile']}` | `{r['v22_mode']}` | {float(r['v22_delta']):.2f}% | "
             f"{float(r['v22_time']):.4f}s | `{r['v23_mode']}` | {float(r['v23_delta']):.2f}% | "
-            f"{float(r['v23_time']):.4f}s | `{list(r['v23_ranked'])}` |"
+            f"{float(r['v23_time']):.4f}s | {int(r['v23_built'])} | "
+            f"{'Y' if bool(r['v23_top1']) else 'N'} | {'Y' if bool(r['v23_top2']) else 'N'} | "
+            f"`{list(r['v23_ranked'])}` | "
+            f"`{dict(r['v23_features'])}` | "
+            f"`{dict(r['v23_strategy_scores'])}` |"
         )
     out.write_text("\n".join(lines), encoding="utf-8")
     print(f"Wrote {out}")

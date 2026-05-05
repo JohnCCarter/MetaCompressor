@@ -47,18 +47,56 @@ def _get_chunking(args: argparse.Namespace) -> str:
 
 
 def cmd_compress(args: argparse.Namespace) -> None:
+    input_path = Path(args.input)
+    if input_path.is_dir():
+        output_path = Path(args.output or "archive.mck")
+        t0 = time.perf_counter()
+        mck, metrics = compress_corpus_template_with_metrics(
+            input_path, adaptive="v2.3", profile=args.profile
+        )
+        elapsed = time.perf_counter() - t0
+        output_path.write_bytes(mck)
+        total_original = sum(
+            p.stat().st_size for p in input_path.rglob("*") if p.is_file()
+        )
+        ratio = len(mck) / total_original if total_original else float("nan")
+        print(
+            f"Compressed (v2.3/{args.profile}) {input_path}  ({total_original:,} bytes across files)\n"
+            f"  -> {output_path}  {len(mck):,} bytes  ratio {ratio:.3f}  time {elapsed * 1000:.1f} ms\n"
+            f"  selected_mode={metrics.get('selected_mode')}"
+        )
+        return
+
+    if args.output is None:
+        raise ValueError("Output path is required when compressing a file")
     data = _read(args.input)
     mc1 = compress(data, chunking_mode=_get_chunking(args))
     _write(args.output, mc1)
     ratio = len(mc1) / len(data) if data else float("nan")
-    print(f"Compressed {len(data):,} → {len(mc1):,} bytes  (ratio {ratio:.3f})")
+    print(f"Compressed {len(data):,} -> {len(mc1):,} bytes  (ratio {ratio:.3f})")
 
 
 def cmd_decompress(args: argparse.Namespace) -> None:
+    input_path = Path(args.input)
+    data = input_path.read_bytes()
+    if input_path.suffix.lower() == ".mck":
+        output_dir = Path(args.output or input_path.with_suffix("").name)
+        t0 = time.perf_counter()
+        extracted = decompress_corpus_template(data, output_dir)
+        elapsed = time.perf_counter() - t0
+        total_out = sum((output_dir / p).stat().st_size for p in extracted)
+        print(
+            f"Decompressed (template-dir) {len(data):,} bytes -> {len(extracted)} files  "
+            f"({total_out:,} bytes total)  time {elapsed * 1000:.1f} ms"
+        )
+        return
+
+    if args.output is None:
+        raise ValueError("Output path is required when decompressing a file")
     mc1 = _read(args.input)
     original = decompress(mc1)
     _write(args.output, original)
-    print(f"Decompressed {len(mc1):,} → {len(original):,} bytes")
+    print(f"Decompressed {len(mc1):,} -> {len(original):,} bytes")
 
 
 def cmd_compare(args: argparse.Namespace) -> None:
@@ -364,20 +402,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_compress = sub.add_parser("compress", help="Compress a file to .mc1")
+    p_compress = sub.add_parser(
+        "compress",
+        help="Compress file to .mc1 or directory to .mck",
+    )
     p_compress.add_argument("input", help="Input file path")
-    p_compress.add_argument("output", help="Output .mc1 file path")
+    p_compress.add_argument(
+        "output",
+        nargs="?",
+        default=None,
+        help="Output path (.mc1 for files, .mck for directories)",
+    )
     p_compress.add_argument(
         "--chunking",
         choices=[CHUNKING_FIXED, CHUNKING_CDC],
         default=CHUNKING_FIXED,
         help="Chunking mode: 'fixed' (default) or 'cdc'",
     )
+    p_compress.add_argument(
+        "--profile",
+        choices=["generic", "logs", "nginx", "json"],
+        default="generic",
+        help="Profile for directory compression (v2.3 mode).",
+    )
     p_compress.set_defaults(func=cmd_compress)
 
-    p_decompress = sub.add_parser("decompress", help="Decompress a .mc1 file")
+    p_decompress = sub.add_parser(
+        "decompress",
+        help="Decompress .mc1 file or .mck archive",
+    )
     p_decompress.add_argument("input", help="Input .mc1 file path")
-    p_decompress.add_argument("output", help="Output file path")
+    p_decompress.add_argument(
+        "output",
+        nargs="?",
+        default=None,
+        help="Output file path (.mc1) or output directory (.mck)",
+    )
     p_decompress.set_defaults(func=cmd_decompress)
 
     p_compare = sub.add_parser("compare", help="Compare MC vs ZSTD compression")

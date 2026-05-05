@@ -110,6 +110,7 @@ VERSION = 0x01
 _ZSTD_LEVEL = 3
 _MIN_TEMPLATE_OCCURRENCES = 2
 _MODE_RAW_TAR_ZSTD = "raw_tar_zstd"
+_MODE_PLAIN_TAR_ZSTD_PASSTHROUGH = "plain_tar_zstd_passthrough"
 _MODE_ROW_V1 = "corpus_template_row_v1"
 _MODE_COLUMNAR_V1 = "corpus_template_columnar_v1"
 _MODE_COLUMNAR_V2 = "corpus_template_columnar_v2"
@@ -178,9 +179,10 @@ _PROFILE_LOGS = "logs"
 _PROFILE_NGINX = "nginx"
 _PROFILE_JSON = "json"
 
-_PREDICTIVE_V23_CONFIDENCE_HIGH = 0.080
-_PREDICTIVE_V23_CONFIDENCE_MEDIUM = 0.045
+_PREDICTIVE_V23_CONFIDENCE_HIGH = 0.060
+_PREDICTIVE_V23_CONFIDENCE_MEDIUM = 0.025
 _PREDICTIVE_V23_REGRESSION_GUARD = 1.02
+_UNIVERSAL_TAR_SIZE_GUARD_EPSILON = 0.02
 
 _STRING_PATTERN_CATALOG: Tuple[str, ...] = (
     "https://",
@@ -2548,17 +2550,38 @@ def _rank_v23_candidates(
     *,
     profile: str,
     prediction_scores: Dict[str, float],
-) -> List[str]:
+    predictor_features: Optional[Dict[str, float]] = None,
+) -> Tuple[List[str], Dict[str, float]]:
     """Rank candidate adaptive modes for v2.3 predictive-only builds."""
     row_score = float(prediction_scores.get("row_template", 1.0))
     col_score = float(prediction_scores.get("columnar_encoding_v2", 1.0))
+    feats = predictor_features or {}
+    prefix_similarity = max(
+        0.0, min(1.0, float(feats.get("prefix_similarity_score", 0.0)))
+    )
+    token_avg = max(0.0, min(1.0, float(feats.get("average_token_length", 0.0)) / 24.0))
+    variance = max(0.0, min(1.0, float(feats.get("field_variance_score", 0.0))))
+    structure = max(0.0, min(1.0, float(feats.get("structure_stability", 0.0))))
+    string_pattern_boost = (
+        max(0.0, prefix_similarity - 0.45) * max(0.0, token_avg - 0.25) * 0.26
+    )
+    field_aware_boost = structure * max(0.0, 1.0 - abs(variance - 0.45) / 0.45) * 0.065
+    columnar_boost = structure * max(0.0, 1.0 - variance) * 0.055
+
+    strategy_scores: Dict[str, float] = {
+        _ADAPT_ROW: row_score,
+        _ADAPT_COL_V2: col_score - columnar_boost,
+        _ADAPT_FIELD_AWARE: col_score + 0.004 - field_aware_boost,
+        _ADAPT_STRING_PATTERN: col_score + 0.005 - string_pattern_boost,
+        _ADAPT_PIPELINE: col_score
+        + 0.006
+        - (0.55 * string_pattern_boost + 0.45 * field_aware_boost),
+        _ADAPT_RELATIONAL: col_score
+        + 0.008
+        - (0.30 * structure * (1.0 - variance) * 0.08),
+    }
     ranking: List[Tuple[float, str]] = [
-        (row_score, _ADAPT_ROW),
-        (col_score, _ADAPT_COL_V2),
-        (col_score + 0.004, _ADAPT_FIELD_AWARE),
-        (col_score + 0.005, _ADAPT_STRING_PATTERN),
-        (col_score + 0.006, _ADAPT_PIPELINE),
-        (col_score + 0.008, _ADAPT_RELATIONAL),
+        (score, mode) for mode, score in strategy_scores.items()
     ]
     if profile == _PROFILE_NGINX:
         # nginx: boost string-pattern and prefix-friendly field-aware; penalize TAR via profile bias.
@@ -2583,7 +2606,7 @@ def _rank_v23_candidates(
             for score, mode in ranking
         ]
     ranking.sort(key=lambda item: (item[0], item[1]))
-    return [mode for _score, mode in ranking]
+    return [mode for _score, mode in ranking], strategy_scores
 
 
 def _fallback_row_stats_from_pass1(
@@ -2971,6 +2994,7 @@ def compress_corpus_template_with_metrics(
         relational_pack: Optional[Tuple[bytes, Dict[str, Any]]] = None
         v23_ranked_candidates: List[str] = []
         v23_built_candidate_count = 0
+        v23_strategy_scores: Dict[str, float] = {}
         pass1_stats = compute_pass1_quick_stats(
             tpl_count,
             tok_cache,
@@ -3087,8 +3111,23 @@ def compress_corpus_template_with_metrics(
                     # Low-confidence TAR still verifies the top template.
                     build_row = prediction.primary_build == _ADAPT_TAR
                 if v23_predictive_enabled:
-                    v23_ranked_candidates = _rank_v23_candidates(
-                        profile=profile, prediction_scores=prediction.scores
+                    v23_ranked_candidates, v23_strategy_scores = _rank_v23_candidates(
+                        profile=profile,
+                        prediction_scores=prediction.scores,
+                        predictor_features={
+                            "structure_stability": float(
+                                predictor_sample.structure_stability
+                            ),
+                            "prefix_similarity_score": float(
+                                predictor_sample.prefix_similarity_score
+                            ),
+                            "average_token_length": float(
+                                predictor_sample.average_token_length
+                            ),
+                            "field_variance_score": float(
+                                predictor_sample.field_variance_score
+                            ),
+                        },
                     )
                     v23_conf = float(prediction.prediction_confidence)
                     if v23_conf >= _PREDICTIVE_V23_CONFIDENCE_HIGH:
@@ -3367,6 +3406,12 @@ def compress_corpus_template_with_metrics(
             "structure_signal_strong": prediction.reasoning.get(
                 "structure_signal_strong", False
             ),
+            "feature_values": {
+                "token_reuse_ratio": predictor_sample.token_reuse_ratio,
+                "average_token_length": predictor_sample.average_token_length,
+                "prefix_similarity_score": predictor_sample.prefix_similarity_score,
+                "field_variance_score": predictor_sample.field_variance_score,
+            },
             "reasoning": prediction.reasoning,
             "skipped_template_builds": skip_templates,
         }
@@ -3380,12 +3425,17 @@ def compress_corpus_template_with_metrics(
                 )
             except ValueError:
                 predicted_rank_vs_actual = -1
+            top1_correct = predicted_rank_vs_actual == 1
+            top2_correct = 0 < predicted_rank_vs_actual <= 2
             predictive_v2_body["v23"] = {
                 "ranked_candidates": list(v23_ranked_candidates),
                 "built_candidate_count": int(v23_built_candidate_count),
                 "confidence_high": _PREDICTIVE_V23_CONFIDENCE_HIGH,
                 "confidence_medium": _PREDICTIVE_V23_CONFIDENCE_MEDIUM,
                 "profile": profile,
+                "strategy_scores": dict(v23_strategy_scores),
+                "top1_correct": bool(top1_correct),
+                "top2_correct": bool(top2_correct),
                 "prediction_error": {
                     "predicted_rank_vs_actual": int(predicted_rank_vs_actual),
                     "actual_selected_mode": actual_mode,
@@ -3518,6 +3568,36 @@ def compress_corpus_template_with_metrics(
         adaptive_meta = dict(adaptive_meta)
         adaptive_meta["adaptive_version"] = "v1"
 
+    fallback_triggered = False
+    fallback_reason: Optional[str] = None
+    tar_guard_limit = int(tarzstd_size * (1.0 + _UNIVERSAL_TAR_SIZE_GUARD_EPSILON))
+    if len(result) > tar_guard_limit:
+        result = tarzstd_bytes
+        final_selected_mode = _MODE_PLAIN_TAR_ZSTD_PASSTHROUGH
+        chose_raw_fallback = True
+        fallback_triggered = True
+        fallback_reason = "container_overhead_guard"
+        adaptive_meta = dict(adaptive_meta)
+        adaptive_meta["selected_mode"] = _MODE_PLAIN_TAR_ZSTD_PASSTHROUGH
+        candidate_sizes = dict(adaptive_meta.get("candidate_sizes", {}))
+        candidate_sizes[_MODE_PLAIN_TAR_ZSTD_PASSTHROUGH] = len(result)
+        adaptive_meta["candidate_sizes"] = candidate_sizes
+        adaptive_meta.setdefault("rejected_modes", []).append(
+            {
+                "mode": "container_overhead_guard",
+                "reason": (
+                    f"selected_exceeds_tar_times_"
+                    f"{(1.0 + _UNIVERSAL_TAR_SIZE_GUARD_EPSILON):.4f}"
+                ),
+            }
+        )
+        adaptive_meta["selection_reason"] = "container_overhead_guard"
+        adaptive_meta["savings_vs_tar_zstd_bytes"] = int(tarzstd_size - len(result))
+        fallback_reason_counts = dict(fallback_reason_counts)
+        fallback_reason_counts["container_overhead_guard"] = (
+            fallback_reason_counts.get("container_overhead_guard", 0) + 1
+        )
+
     assert row_stats is not None
     t_total_s = time.perf_counter() - t_total_start
 
@@ -3554,6 +3634,9 @@ def compress_corpus_template_with_metrics(
         "compressed_size": len(result),
         "tarzstd_size": tarzstd_size,
         "chose_raw_fallback": chose_raw_fallback,
+        "fallback_triggered": fallback_triggered,
+        "fallback_reason": fallback_reason,
+        "tar_size_guard_epsilon": _UNIVERSAL_TAR_SIZE_GUARD_EPSILON,
         "columnar_enabled": True,
         "columnar_v2_enabled": True,
         "num_columnar_templates": col_src_counts["num_columnar_templates"],
@@ -3663,18 +3746,37 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
     ValueError
         On invalid magic bytes, unsupported version, or corrupt payload.
     """
-    if len(data) < 5:
-        raise ValueError("Data too short to be a valid .mck file")
-    if data[:4] != MAGIC:
-        raise ValueError(f"Invalid magic bytes: {data[:4]!r}")
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dctx = zstd.ZstdDecompressor()
+    extracted: List[str] = []
+
+    # Passthrough path: plain TAR+ZSTD payload (no MCK magic/header).
+    if len(data) < 5 or data[:4] != MAGIC:
+        try:
+            with dctx.stream_reader(io.BytesIO(data)) as reader:
+                tar_bytes = reader.read()
+        except zstd.ZstdError as exc:
+            raise ValueError(f"Invalid magic bytes: {data[:4]!r}") from exc
+        buf = io.BytesIO(tar_bytes)
+        try:
+            with tarfile.open(fileobj=buf, mode="r") as tar:
+                for member in tar.getmembers():
+                    if member.isfile():
+                        out_path = output_dir / member.name
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        f = tar.extractfile(member)
+                        if f is not None:
+                            out_path.write_bytes(f.read())
+                        extracted.append(member.name)
+        except tarfile.TarError as exc:
+            raise ValueError("Invalid passthrough TAR+ZSTD payload") from exc
+        return extracted
+
     version = data[4]
     if version != VERSION:
         raise ValueError(f"Unsupported .mck version: {version}")
 
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    dctx = zstd.ZstdDecompressor()
     try:
         with dctx.stream_reader(io.BytesIO(data[5:])) as reader:
             raw_payload = reader.read()
@@ -3682,7 +3784,6 @@ def decompress_corpus_template(data: bytes, output_dir: Path) -> List[str]:
         raise ValueError(f"Zstandard decompression failed: {exc}") from exc
 
     payload = msgpack.unpackb(raw_payload, raw=False)
-    extracted: List[str] = []
 
     mode = payload.get("mode", "template")
 

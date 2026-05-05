@@ -10,6 +10,7 @@ and a strict post-build tolerance vs plain TAR+ZSTD size.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Tuple
@@ -72,6 +73,10 @@ class CorpusSampleFeatures:
     structure_unique_key_set_ratio: float = 1.0
     structure_dominant_key_set_share: float = 0.0
     structure_keyed_line_fraction: float = 0.0
+    token_reuse_ratio: float = 0.0
+    average_token_length: float = 0.0
+    prefix_similarity_score: float = 0.0
+    field_variance_score: float = 0.0
 
 
 @dataclass
@@ -136,6 +141,9 @@ def _clamp01(value: float) -> float:
     return min(1.0, max(0.0, value))
 
 
+_WORD_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
 def _structure_key_set(analysis: _LineAnalysis) -> Tuple[Tuple[str, ...], bool]:
     """Return a deterministic per-line structural key set.
 
@@ -179,6 +187,12 @@ def sample_corpus_features(
     slot_uniques: Dict[Tuple[Tuple[str, ...], int], set] = {}
     unique_line_set: set[str] = set()
     keyed_structure_lines = 0
+    token_counts: Dict[str, int] = {}
+    token_len_sum = 0
+    token_total = 0
+    prefix_num = 0.0
+    prefix_den = 0.0
+    slot_ratio_samples: List[float] = []
 
     n_len = 0
     mean_len = 0.0
@@ -219,6 +233,11 @@ def sample_corpus_features(
                 )
 
                 analysis = _line_analysis(line, structure_v2_enabled)
+                tokens = _WORD_TOKEN_RE.findall(line)
+                for token in tokens:
+                    token_total += 1
+                    token_len_sum += len(token)
+                    token_counts[token] = token_counts.get(token, 0) + 1
                 sk = analysis.normalized_skeleton
                 skeleton_counts[sk] = skeleton_counts.get(sk, 0) + 1
                 structure_keys, has_semantic_keys = _structure_key_set(analysis)
@@ -239,6 +258,20 @@ def sample_corpus_features(
                     sset = slot_uniques[skey]
                     if len(sset) < config.max_cardinality_track:
                         sset.add(val)
+                if len(analysis.values) > 1:
+                    vals = [v for v in analysis.values if v]
+                    if len(vals) > 1:
+                        sorted_vals = sorted(vals)
+                        a = sorted_vals[0]
+                        b = sorted_vals[-1]
+                        max_len = max(len(a), len(b), 1)
+                        common = 0
+                        for ca, cb in zip(a, b):
+                            if ca != cb:
+                                break
+                            common += 1
+                        prefix_num += common
+                        prefix_den += max_len
         except (UnicodeDecodeError, OSError):
             out.binary_files_seen += 1
             continue
@@ -270,6 +303,20 @@ def sample_corpus_features(
     cap = min(config.max_cardinality_track, max(1, out.sample_lines))
     ratios = [len(s) / cap for s in slot_uniques.values()]
     out.mean_slot_cardinality_ratio = sum(ratios) / len(ratios) if ratios else 0.0
+    slot_ratio_samples = ratios
+    if token_total > 0:
+        repeated = sum(1 for c in token_counts.values() if c > 1)
+        out.token_reuse_ratio = repeated / max(1, len(token_counts))
+        out.average_token_length = token_len_sum / token_total
+    out.prefix_similarity_score = (
+        _clamp01(prefix_num / prefix_den) if prefix_den > 0.0 else 0.0
+    )
+    if slot_ratio_samples:
+        slot_mean = sum(slot_ratio_samples) / len(slot_ratio_samples)
+        slot_var = sum((x - slot_mean) ** 2 for x in slot_ratio_samples) / len(
+            slot_ratio_samples
+        )
+        out.field_variance_score = _clamp01(slot_var * 6.0)
 
     return out
 
@@ -533,8 +580,21 @@ def _estimate_expected_compression_scores_v22(
             "structure_columnar_score_boost": structure_boost,
             "structured_slot_relief": structured_slot_relief,
             "structure_weight": config.structure_weight,
+            "token_reuse_ratio": sample.token_reuse_ratio,
+            "average_token_length": sample.average_token_length,
+            "prefix_similarity_score": sample.prefix_similarity_score,
+            "field_variance_score": sample.field_variance_score,
         }
     )
+    variance_low_bonus = (
+        structure_stability
+        * (1.0 - _clamp01(sample.field_variance_score))
+        * min(0.08, 0.04 + 0.04 * _clamp01(sample.token_reuse_ratio))
+    )
+    scores["columnar_encoding_v2"] -= variance_low_bonus
+    components["columnar_encoding_v2"][
+        "low_variance_stability_bonus"
+    ] = -variance_low_bonus
     return scores, components, reasoning
 
 

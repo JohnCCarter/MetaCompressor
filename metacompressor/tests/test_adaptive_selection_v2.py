@@ -351,3 +351,70 @@ def test_v2_encode_time_less_or_equal_than_v1_on_skippable_corpus(tmp_path):
     if m_v2["predictive_v2"]["skipped_template_builds"]:
         assert m_v2["timing"]["encode_s"] <= m_v1["timing"]["encode_s"] + 1e-6
         assert dt_v2 < dt_v1 * 0.95 or m_v2["timing"]["encode_s"] == 0.0
+
+
+def test_v23_universal_tar_size_guard_limits_small_dataset_losses(tmp_path):
+    epsilon = 0.02
+    datasets = [
+        {
+            "name": "small_json",
+            "files": {
+                "events.jsonl": b"".join(
+                    (
+                        '{"service":"auth","status":200,'
+                        f'"route":"/token/{i % 7}","user":{i % 19}}}\n'
+                    ).encode()
+                    for i in range(620)
+                )
+            },
+            "profile": "json",
+        },
+        {
+            "name": "small_logs",
+            "files": {
+                "app.log": b"".join(
+                    (
+                        f"INFO user={i % 9} route=/api/{i % 11} "
+                        f"status={200 + (i % 3)}\n"
+                    ).encode()
+                    for i in range(720)
+                )
+            },
+            "profile": "logs",
+        },
+        {
+            "name": "small_nginx_like",
+            "files": {
+                "access.log": b"".join(
+                    (
+                        f"10.0.0.{i % 250} - - [05/May/2026:12:{i % 60:02d}:00 +0000] "
+                        f'"GET /v1/{i % 13}/item.json HTTP/1.1" {200 + (i % 4)} 1234\n'
+                    ).encode()
+                    for i in range(720)
+                )
+            },
+            "profile": "nginx",
+        },
+    ]
+    losses = []
+    for idx, ds in enumerate(datasets):
+        corpus = make_corpus(tmp_path / f"small_{idx}", ds["files"])
+        _, metrics = compress_corpus_template_with_metrics(
+            corpus,
+            adaptive="v2.3",
+            profile=ds["profile"],
+        )
+        loss = max(
+            0.0,
+            100.0
+            * (int(metrics["compressed_size"]) - int(metrics["tarzstd_size"]))
+            / max(1, int(metrics["tarzstd_size"])),
+        )
+        losses.append(loss)
+        assert (
+            int(metrics["compressed_size"])
+            <= int(metrics["tarzstd_size"] * (1.0 + epsilon)) + 2
+        )
+        if metrics["fallback_triggered"]:
+            assert metrics["fallback_reason"] == "container_overhead_guard"
+    assert max(losses) <= 2.0

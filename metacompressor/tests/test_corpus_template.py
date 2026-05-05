@@ -15,6 +15,7 @@ from metacompressor.corpus_template import (
     _ADAPT_COL_V2,
     _MODE_COLUMNAR_V1,
     _MODE_COLUMNAR_V2,
+    _MODE_PLAIN_TAR_ZSTD_PASSTHROUGH,
     MAGIC,
     VERSION,
     _tokenize,
@@ -205,6 +206,19 @@ class TestDeterminism:
         dir2 = make_corpus(tmp_path / "run2", files)
         assert compress_corpus_template(dir1) == compress_corpus_template(dir2)
 
+    def test_passthrough_deterministic_when_triggered(self, tmp_path):
+        files = {"a.log": b"INFO n=1\n" * 80, "b.log": b"INFO n=2\n" * 70}
+        d1 = make_corpus(tmp_path / "p1", files)
+        d2 = make_corpus(tmp_path / "p2", files)
+        a1, m1 = compress_corpus_template_with_metrics(
+            d1, adaptive="v2.3", profile="logs"
+        )
+        a2, m2 = compress_corpus_template_with_metrics(
+            d2, adaptive="v2.3", profile="logs"
+        )
+        assert a1 == a2
+        assert m1["selected_mode"] == m2["selected_mode"]
+
 
 # ---------------------------------------------------------------------------
 # Metrics and explainability
@@ -258,6 +272,37 @@ class TestMetrics:
             "adaptive_columnar_profile",
         }
         assert expected_keys.issubset(metrics.keys())
+
+    def test_passthrough_round_trip_and_metrics(self, tmp_path):
+        files = {"a.log": b"INFO n=1\n" * 80, "b.log": b"INFO n=2\n" * 70}
+        corpus_dir = make_corpus(tmp_path, files)
+        archive, metrics = compress_corpus_template_with_metrics(
+            corpus_dir, adaptive="v2.3", profile="logs"
+        )
+        assert metrics["selected_mode"] == _MODE_PLAIN_TAR_ZSTD_PASSTHROUGH
+        assert metrics["fallback_triggered"] is True
+        assert metrics["fallback_reason"] == "container_overhead_guard"
+        out_dir = tmp_path / "recovered_passthrough"
+        decompress_corpus_template(archive, out_dir)
+        for rel, data in files.items():
+            assert (out_dir / rel).read_bytes() == data
+
+    def test_normal_mck_path_unaffected(self, tmp_path):
+        files = {
+            "big.log": b"".join(
+                (
+                    f"INFO user={i % 19} status={200 + (i % 4)} "
+                    f"route=/api/v1/orders/{i % 27}\n"
+                ).encode()
+                for i in range(8000)
+            )
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        archive, metrics = compress_corpus_template_with_metrics(
+            corpus_dir, adaptive="v2.3", profile="logs"
+        )
+        assert metrics["selected_mode"] != _MODE_PLAIN_TAR_ZSTD_PASSTHROUGH
+        assert archive[:4] == MAGIC
 
     def test_timing_keys_present(self, tmp_path):
         from metacompressor.corpus_template import compress_corpus_template_with_metrics
