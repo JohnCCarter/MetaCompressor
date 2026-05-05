@@ -25,6 +25,7 @@ find_similar_chunk(chunk, chunks, recent_ids, threshold) -> (base_id, diffs) | N
 from __future__ import annotations
 
 import msgpack
+import numpy as np
 
 SIMILARITY_THRESHOLD = 0.80
 MAX_CANDIDATES = 64
@@ -38,7 +39,9 @@ def similarity(a: bytes, b: bytes) -> float:
     n = len(a)
     if n == 0 or len(b) != n:
         return 0.0
-    return sum(x == y for x, y in zip(a, b)) / n
+    arr_a = np.frombuffer(a, dtype=np.uint8)
+    arr_b = np.frombuffer(b, dtype=np.uint8)
+    return float((arr_a == arr_b).mean())
 
 
 def compute_delta(base: bytes, target: bytes) -> list[list[int]]:
@@ -49,7 +52,20 @@ def compute_delta(base: bytes, target: bytes) -> list[list[int]]:
     ``len(target)`` are not represented (the caller passes *target_len* to
     :func:`apply_delta` to handle truncation).
     """
-    return [[i, target[i]] for i in range(len(target)) if target[i] != base[i]]
+    target_len = len(target)
+    if target_len == 0:
+        return []
+    base_view = np.frombuffer(base[:target_len], dtype=np.uint8)
+    target_view = np.frombuffer(target, dtype=np.uint8)
+    if base_view.shape[0] != target_view.shape[0]:
+        # Pure-Python fallback for the unusual short-base case.
+        return [[i, target[i]] for i in range(target_len) if i >= len(base) or target[i] != base[i]]
+    mask = base_view != target_view
+    offsets = np.flatnonzero(mask)
+    if offsets.size == 0:
+        return []
+    values = target_view[offsets]
+    return [[int(o), int(v)] for o, v in zip(offsets, values)]
 
 
 def apply_delta(base: bytes, diffs: list, target_len: int) -> bytes:
@@ -114,25 +130,34 @@ def find_similar_chunk(
     ``(base_chunk_id, diffs)`` if a suitable base is found, else ``None``.
     """
     chunk_len = len(chunk)
-    best_sim = threshold
-    best_id: int | None = None
-    best_diffs: list[list[int]] | None = None
+    if chunk_len == 0:
+        return None
 
-    # Scan the most-recently-added same-size candidates first.
     candidates = [
         cid
         for cid in reversed(recent_ids[-MAX_CANDIDATES:])
         if len(full_chunks.get(cid, b"")) == chunk_len
     ]
+    if not candidates:
+        return None
+
+    target_view = np.frombuffer(chunk, dtype=np.uint8)
+    threshold_matches = int(threshold * chunk_len) + 1  # strictly greater than threshold
+
+    best_matches = threshold_matches - 1
+    best_id: int | None = None
+    best_base: bytes | None = None
 
     for cid in candidates:
         base = full_chunks[cid]
-        sim = similarity(base, chunk)
-        if sim > best_sim:
-            best_sim = sim
+        base_view = np.frombuffer(base, dtype=np.uint8)
+        matches = int(np.count_nonzero(base_view == target_view))
+        if matches > best_matches:
+            best_matches = matches
             best_id = cid
-            best_diffs = compute_delta(base, chunk)
+            best_base = base
 
     if best_id is None:
         return None
-    return best_id, best_diffs  # type: ignore[return-value]
+    best_diffs = compute_delta(best_base, chunk)  # type: ignore[arg-type]
+    return best_id, best_diffs

@@ -45,6 +45,8 @@ from typing import Dict, List, Tuple
 import msgpack
 import zstandard as zstd
 
+from metacompressor.container import _zstd_threads
+
 # ---------------------------------------------------------------------------
 # Format constants
 # ---------------------------------------------------------------------------
@@ -296,10 +298,16 @@ def get_compress_mode(compressed: bytes) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _serialise(payload: dict) -> bytes:
-    """Pack *payload* with msgpack, compress with zstd, prepend header."""
+def _serialise(payload: dict, level: int = _ZSTD_LEVEL) -> bytes:
+    """Pack *payload* with msgpack, compress with zstd, prepend header.
+
+    *level* defaults to the module's ``_ZSTD_LEVEL`` (3) so that raw-mode
+    payloads (plain text wrapped in msgpack) keep their full ratio.  Callers
+    that pack already-structured template payloads can pass ``level=1`` to
+    skip ZSTD's redundant search pass.
+    """
     raw = msgpack.packb(payload, use_bin_type=True)
-    cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
+    cctx = zstd.ZstdCompressor(level=level, threads=_zstd_threads())
     compressed = cctx.compress(raw)
     return MAGIC + bytes([VERSION]) + compressed
 

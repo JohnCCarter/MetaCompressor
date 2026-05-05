@@ -312,13 +312,17 @@ def _prepare_template_context(
     tpl_count = {}
     total_lines = 0
 
+    line_intern: Dict[str, str] = {}
     t_tokenize_start = time.perf_counter()
     for file_path in all_files:
         rel = file_path.relative_to(input_dir).as_posix()
         file_tpl_count = {}
         file_total_lines = 0
+        cached_lines: list = []
         try:
-            for line in _iter_text_lines(file_path):
+            for raw_line in _iter_text_lines(file_path):
+                line = line_intern.setdefault(raw_line, raw_line)
+                cached_lines.append(line)
                 file_total_lines += 1
                 if line not in tok_cache:
                     if structure_v2_enabled:
@@ -335,12 +339,12 @@ def _prepare_template_context(
                         )
                 template_key = tok_cache[line].template_parts
                 file_tpl_count[template_key] = file_tpl_count.get(template_key, 0) + 1
-            file_meta.append((rel, False))
+            file_meta.append((rel, False, cached_lines))
             total_lines += file_total_lines
             for template_key, count in file_tpl_count.items():
                 tpl_count[template_key] = tpl_count.get(template_key, 0) + count
         except UnicodeDecodeError:
-            file_meta.append((rel, True))
+            file_meta.append((rel, True, None))
     tokenize_s = time.perf_counter() - t_tokenize_start
 
     tpl_to_id = {}

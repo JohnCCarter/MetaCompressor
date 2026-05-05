@@ -29,6 +29,7 @@ def compress(
     avg_chunk_size: int = CDC_AVG_CHUNK_SIZE,
     max_chunk_size: int = CDC_MAX_CHUNK_SIZE,
     cdc_mask: int = CDC_MASK,
+    use_delta: bool = False,
 ) -> bytes:
     """Compress *data* and return the serialised .mc1 byte string.
 
@@ -44,18 +45,13 @@ def compress(
         content-defined chunking.
     min_chunk_size / avg_chunk_size / max_chunk_size / cdc_mask:
         CDC parameters (used only when *chunking_mode* is ``"cdc"``).
-
-    Steps
-    -----
-    1. Split *data* into chunks (fixed or CDC).
-    2. Hash each chunk with xxhash-64 to obtain its identity.
-    3. Build a dictionary mapping hash → (chunk_id, raw bytes), storing
-       only the first occurrence of each unique chunk.
-    4. For each new unique chunk, attempt delta encoding against recently
-       stored full chunks of the same size.  A delta is stored only when it
-       is smaller than the raw chunk bytes; otherwise the full chunk is kept.
-    5. Build the reference sequence (list of chunk_ids).
-    6. Serialise the container and compress with Zstandard.
+    use_delta:
+        When ``True``, attempt intra-chunk delta encoding for near-duplicate
+        chunks.  Defaults to ``False`` because the similarity scan is
+        O(MAX_CANDIDATES × chunk_len) of pure-Python work per new chunk and
+        yields no measurable ratio benefit on diverse data (see
+        ``results/delta_benchmark.md``).  Enable explicitly for corpora with
+        many same-length near-duplicate chunks.
     """
     if chunking_mode not in (CHUNKING_FIXED, CHUNKING_CDC):
         raise ValueError(
@@ -93,16 +89,17 @@ def compress(
             next_id += 1
             hash_to_id[h] = cid
 
-            # Attempt delta encoding against recent full chunks.
-            delta_result = find_similar_chunk(chunk, container.chunks, full_id_order)
-            if delta_result is not None:
-                base_id, diffs = delta_result
-                if delta_encoded_size(diffs) < len(chunk):
-                    container.delta_chunks[cid] = (base_id, len(chunk), diffs)
-                    container.sequence.append(cid)
-                    continue
+            if use_delta:
+                delta_result = find_similar_chunk(
+                    chunk, container.chunks, full_id_order
+                )
+                if delta_result is not None:
+                    base_id, diffs = delta_result
+                    if delta_encoded_size(diffs) < len(chunk):
+                        container.delta_chunks[cid] = (base_id, len(chunk), diffs)
+                        container.sequence.append(cid)
+                        continue
 
-            # Fall back to storing the full chunk.
             container.chunks[cid] = chunk
             full_id_order.append(cid)
 

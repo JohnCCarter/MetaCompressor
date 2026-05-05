@@ -11,6 +11,7 @@ dependencies = [
     "zstandard>=0.22",
     "xxhash>=3.0",
     "msgpack>=1.0",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]

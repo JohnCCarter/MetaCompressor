@@ -98,13 +98,23 @@ from typing import Any, Dict, List, Optional, Tuple
 import msgpack
 import zstandard as zstd
 
+from metacompressor.container import _zstd_threads
+
 # ---------------------------------------------------------------------------
 # Format constants
 # ---------------------------------------------------------------------------
 
 MAGIC = b"MCK\x00"
 VERSION = 0x01
+# Baseline level used by _build_tarzstd_bytes (the plain TAR+ZSTD baseline
+# against which MC's template archive is compared).  Keep at 3 so the
+# benchmark baseline matches typical ZSTD usage.
 _ZSTD_LEVEL = 3
+# Level used when packing payloads where MC has already extracted templates
+# and emitted varint/columnar/dictionary encodings.  Most of the structure
+# ZSTD's level-3 search would recover has already been pulled out by MC, so
+# level 1 captures the remaining gains at a fraction of the CPU cost.
+_ZSTD_LEVEL_STRUCTURED = 1
 _MIN_TEMPLATE_OCCURRENCES = 2
 _MODE_RAW_TAR_ZSTD = "raw_tar_zstd"
 _MODE_ROW_V1 = "corpus_template_row_v1"
@@ -543,10 +553,12 @@ def _iter_text_lines(file_path: Path) -> Iterator[str]:
         yield ""
 
 
-def _pack_archive_payload(payload: dict, level: int = _ZSTD_LEVEL) -> bytes:
+def _pack_archive_payload(payload: dict, level: int = _ZSTD_LEVEL_STRUCTURED) -> bytes:
     """Pack *payload* as an ``.mck`` archive."""
     raw = msgpack.packb(payload, use_bin_type=True)
-    return MAGIC + bytes([VERSION]) + zstd.ZstdCompressor(level=level).compress(raw)
+    return MAGIC + bytes([VERSION]) + zstd.ZstdCompressor(
+        level=level, threads=_zstd_threads()
+    ).compress(raw)
 
 
 def _build_tarzstd_bytes(input_dir: Path, all_files: List[Path]) -> bytes:
@@ -897,7 +909,7 @@ def _decode_row_refs(encoded_row_refs: Any) -> List[List[int]]:
 def _build_row_template_archive(
     input_dir: Path,
     all_files: List[Path],
-    file_meta: List[Tuple[str, bool]],
+    file_meta: List[Tuple[str, bool, Optional[List[str]]]],
     tok_cache: Dict[str, _LineAnalysis],
     tpl_to_id: Dict[Tuple[str, ...], int],
     tpl_strings: List[str],
@@ -915,9 +927,9 @@ def _build_row_template_archive(
     output.write(MAGIC + bytes([VERSION]))
     packer = msgpack.Packer(use_bin_type=True)
 
-    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
-        output, closefd=False
-    ) as compressor:
+    with zstd.ZstdCompressor(
+        level=_ZSTD_LEVEL_STRUCTURED, threads=_zstd_threads()
+    ).stream_writer(output, closefd=False) as compressor:
         compressor.write(packer.pack_map_header(2))
         compressor.write(packer.pack("templates"))
         compressor.write(packer.pack(tpl_strings))
@@ -925,7 +937,7 @@ def _build_row_template_archive(
         compressor.write(packer.pack_array_header(len(all_files)))
 
         t_serialize_start = time.perf_counter()
-        for file_path, (rel, is_binary) in zip(all_files, file_meta):
+        for file_path, (rel, is_binary, cached_lines) in zip(all_files, file_meta):
             if is_binary:
                 raw = file_path.read_bytes()
                 binary_fallback_files += 1
@@ -935,12 +947,12 @@ def _build_row_template_archive(
                 compressor.write(packer.pack({"path": rel, "records": [[-2, raw]]}))
                 continue
 
+            assert cached_lines is not None
             file_tpl_lines = 0
             file_raw_lines = 0
             file_var_total = 0
-            file_total_lines = 0
-            for line in _iter_text_lines(file_path):
-                file_total_lines += 1
+            file_total_lines = len(cached_lines)
+            for line in cached_lines:
                 analysis = tok_cache[line]
                 tkey = analysis.template_parts
                 if tkey in tpl_to_id:
@@ -977,7 +989,7 @@ def _build_row_template_archive(
                 compressor.write(packer.pack(rel))
                 compressor.write(packer.pack("records"))
                 compressor.write(packer.pack_array_header(file_total_lines))
-                for line in _iter_text_lines(file_path):
+                for line in cached_lines:
                     analysis = tok_cache[line]
                     tkey = analysis.template_parts
                     tpl_id = tpl_to_id.get(tkey)
@@ -1046,9 +1058,9 @@ def _pack_columnar_archive(
     output.write(MAGIC + bytes([VERSION]))
     packer = msgpack.Packer(use_bin_type=True)
 
-    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
-        output, closefd=False
-    ) as compressor:
+    with zstd.ZstdCompressor(
+        level=_ZSTD_LEVEL_STRUCTURED, threads=_zstd_threads()
+    ).stream_writer(output, closefd=False) as compressor:
         compressor.write(packer.pack_map_header(6))
         compressor.write(packer.pack("mode"))
         compressor.write(packer.pack(mode))
@@ -1076,7 +1088,7 @@ def _pack_columnar_archive(
 
 def _build_columnar_template_archive(
     all_files: List[Path],
-    file_meta: List[Tuple[str, bool]],
+    file_meta: List[Tuple[str, bool, Optional[List[str]]]],
     tok_cache: Dict[str, _LineAnalysis],
     tpl_to_id: Dict[Tuple[str, ...], int],
     tpl_strings: List[str],
@@ -1099,7 +1111,7 @@ def _build_columnar_template_archive(
     raw_column_fallback_count = 0
 
     t_encode_start = time.perf_counter()
-    for file_path, (rel, is_binary) in zip(all_files, file_meta):
+    for file_path, (rel, is_binary, cached_lines) in zip(all_files, file_meta):
         file_id = len(files_payload)
         if is_binary:
             files_payload.append(
@@ -1113,13 +1125,13 @@ def _build_columnar_template_archive(
             )
             continue
 
+        assert cached_lines is not None
         file_tpl_lines = 0
         file_raw_lines = 0
         file_var_total = 0
-        file_total_lines = 0
+        file_total_lines = len(cached_lines)
 
-        for line in _iter_text_lines(file_path):
-            file_total_lines += 1
+        for line in cached_lines:
             analysis = tok_cache[line]
             tkey = analysis.template_parts
             tpl_id = tpl_to_id.get(tkey)
@@ -1160,7 +1172,7 @@ def _build_columnar_template_archive(
         raw_fallback_lines += file_raw_lines
         total_var_slots += file_var_total
 
-        for line_index, line in enumerate(_iter_text_lines(file_path)):
+        for line_index, line in enumerate(cached_lines):
             analysis = tok_cache[line]
             tkey = analysis.template_parts
             tpl_id = tpl_to_id.get(tkey)
@@ -1370,8 +1382,17 @@ def compress_corpus_template_with_metrics(
     # -----------------------------------------------------------------------
     t_extract_start = time.perf_counter()
 
-    # file_meta stores (rel_path, is_binary) only — no raw bytes between passes.
-    file_meta: List[Tuple[str, bool]] = []
+    # file_meta stores (rel_path, is_binary, cached_lines).  cached_lines is
+    # None for binary files; for text files it is the per-file ordered list
+    # of line strings, where each string is interned via line_intern below so
+    # duplicates across the corpus share a single object.  The downstream
+    # archive builders consume cached_lines directly, eliminating the second
+    # and third disk reads they would otherwise perform.
+    file_meta: List[Tuple[str, bool, Optional[List[str]]]] = []
+
+    # Interns line strings across all files so cached_lines memory is
+    # O(unique_lines × avg_line_len) instead of O(total_lines × avg_line_len).
+    line_intern: Dict[str, str] = {}
 
     # tok_cache: unique line → (template_key, variable_values).
     # One regex call per *unique* line; for repetitive corpora this reduces
@@ -1394,8 +1415,11 @@ def compress_corpus_template_with_metrics(
         file_json_template_keys: Dict[Tuple[str, ...], int] = {}
         file_total_lines = 0
         file_json_lines = 0
+        cached_lines: List[str] = []
         try:
-            for line in _iter_text_lines(file_path):
+            for raw_line in _iter_text_lines(file_path):
+                line = line_intern.setdefault(raw_line, raw_line)
+                cached_lines.append(line)
                 file_total_lines += 1
                 if line not in legacy_tok_cache:
                     legacy_tok_cache[line] = _tokenize_legacy(line)
@@ -1434,7 +1458,7 @@ def compress_corpus_template_with_metrics(
                     file_json_template_keys[analysis.json_structure_key] = (
                         file_json_template_keys.get(analysis.json_structure_key, 0) + 1
                     )
-            file_meta.append((rel, False))
+            file_meta.append((rel, False, cached_lines))
             total_lines += file_total_lines
             for tkey, count in file_legacy_tpl_count.items():
                 legacy_tpl_count[tkey] = legacy_tpl_count.get(tkey, 0) + count
@@ -1450,8 +1474,7 @@ def compress_corpus_template_with_metrics(
                     json_template_keys.get(json_key, 0) + count
                 )
         except UnicodeDecodeError:
-            file_meta.append((rel, True))
-        # raw, text, lines are freed at end of each iteration — O(1 file) peak.
+            file_meta.append((rel, True, None))
     t_tokenize_s = time.perf_counter() - t_tokenize_start
     t_count_s = 0.0  # tokenise and count are combined in a single pass above
 
