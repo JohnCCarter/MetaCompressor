@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import msgpack
+from metacompressor.zstd_affinity_pack_v1 import payload_includes_delta_chunks
 
 
 def wire_includes_delta_chunks(uncompressed_payload: bytes) -> bool:
-    """Return True if the payload map contains non-empty ``delta_chunks``."""
-    try:
-        payload = msgpack.unpackb(uncompressed_payload, raw=False)
-    except Exception:
-        return False
-    return "delta_chunks" in payload and len(payload.get("delta_chunks", [])) > 0
+    """Return True if the wire payload includes non-empty delta chunk data."""
+    return payload_includes_delta_chunks(uncompressed_payload)

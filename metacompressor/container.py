@@ -4,31 +4,21 @@
 ---------------------------------
 [4 bytes] magic  "MC1\x00"
 [1 byte]  version  0x01
-[N bytes] zstandard-compressed msgpack payload
+[N bytes] zstandard-compressed payload
 
-.mc1 payload (msgpack map)
---------------------------
-chunking_mode  : str   "fixed" | "cdc"   (absent in pre-CDC files → "fixed")
-chunk_size     : int   (fixed mode)
-min_chunk_size : int   (cdc mode)
-avg_chunk_size : int   (cdc mode)
-max_chunk_size : int   (cdc mode)
-cdc_mask       : int   (cdc mode)
-chunks         : list of [chunk_id: int, data: bytes]  (ordered by chunk_id)
-sequence       : list of int  (chunk_ids in original order)
-delta_chunks   : list of [cid, base_cid, target_len, diffs]  (optional)
+Payload (default, on disk): single **msgpack** map (``chunks`` as ``[id, bytes]``
+pairs in sorted chunk-id order, plus ``sequence``, metadata, optional
+``delta_chunks``).
+
+Optional **ZSTD-affinity** experimental layout (``MCZ1`` prefix) can be read by
+:func:`deserialise` / :func:`deserialise_dir`; see
+:mod:`metacompressor.zstd_affinity_pack_v1` for pack helpers used in benchmarks.
 
 .mc1dir binary layout (multi-file corpus)
 ------------------------------------------
 [4 bytes] magic  "MCD\x00"
 [1 byte]  version  0x01
-[N bytes] zstandard-compressed msgpack payload
-
-.mc1dir payload (msgpack map)
-------------------------------
-chunk_size  : int
-chunks      : list of [chunk_id: int, data: bytes]  (shared dictionary, ordered by chunk_id)
-files       : list of {path: str, sequence: list of int}  (per-file sequences, path is relative)
+[N bytes] zstandard-compressed payload (msgpack or ``MCZ1`` affinity)
 """
 
 from __future__ import annotations
@@ -39,6 +29,22 @@ import msgpack
 import zstandard as zstd
 
 from metacompressor.mc1_types import FileEntry, MC1Container, MC1DirContainer
+from metacompressor.zstd_affinity_pack_v1 import (
+    MCZ1_MAGIC,
+    is_zstd_affinity_v1_payload,
+)
+from metacompressor.zstd_affinity_pack_v1 import (
+    pack_mc1_payload as pack_mc1_payload_affinity,
+)
+from metacompressor.zstd_affinity_pack_v1 import (
+    pack_mc1dir_payload as pack_mc1dir_payload_affinity,
+)
+from metacompressor.zstd_affinity_pack_v1 import (
+    unpack_mc1_payload as unpack_mc1_payload_affinity,
+)
+from metacompressor.zstd_affinity_pack_v1 import (
+    unpack_mc1dir_payload as unpack_mc1dir_payload_affinity,
+)
 
 # Public types (re-exported for stable ``from metacompressor.container import``).
 __all__ = [
@@ -47,11 +53,17 @@ __all__ = [
     "MC1DirContainer",
     "MAGIC",
     "MAGIC_DIR",
+    "MCZ1_MAGIC",
     "VERSION",
     "VERSION_DIR",
     "_ZSTD_LEVEL",
+    "is_zstd_affinity_v1_payload",
     "pack_mc1_payload",
     "pack_mc1dir_payload",
+    "pack_mc1_payload_affinity",
+    "pack_mc1dir_payload_affinity",
+    "pack_mc1_payload_msgpack",
+    "pack_mc1dir_payload_msgpack",
     "serialise",
     "serialise_dir",
     "deserialise",
@@ -90,9 +102,14 @@ def _mc1_payload_dict(container: MC1Container) -> dict:
     return payload
 
 
-def pack_mc1_payload(container: MC1Container) -> bytes:
-    """Return the uncompressed msgpack bytes that ZSTD compresses for .mc1."""
+def pack_mc1_payload_msgpack(container: MC1Container) -> bytes:
+    """All-msgpack uncompressed payload (default on-disk format)."""
     return msgpack.packb(_mc1_payload_dict(container), use_bin_type=True)
+
+
+def pack_mc1_payload(container: MC1Container) -> bytes:
+    """Return the uncompressed bytes ZSTD compresses for .mc1 (default: msgpack)."""
+    return pack_mc1_payload_msgpack(container)
 
 
 def _mc1dir_payload_dict(container: MC1DirContainer) -> dict:
@@ -112,9 +129,14 @@ def _mc1dir_payload_dict(container: MC1DirContainer) -> dict:
     return payload
 
 
-def pack_mc1dir_payload(container: MC1DirContainer) -> bytes:
-    """Return the uncompressed msgpack bytes that ZSTD compresses for .mc1dir."""
+def pack_mc1dir_payload_msgpack(container: MC1DirContainer) -> bytes:
+    """All-msgpack uncompressed payload (default on-disk format)."""
     return msgpack.packb(_mc1dir_payload_dict(container), use_bin_type=True)
+
+
+def pack_mc1dir_payload(container: MC1DirContainer) -> bytes:
+    """Return the uncompressed bytes ZSTD compresses for .mc1dir (default: msgpack)."""
+    return pack_mc1dir_payload_msgpack(container)
 
 
 def serialise(container: MC1Container) -> bytes:
@@ -145,6 +167,9 @@ def deserialise(data: bytes) -> MC1Container:
         raw = dctx.decompress(data[5:])
     except zstd.ZstdError as exc:
         raise ValueError(f"Zstandard decompression failed: {exc}") from exc
+
+    if is_zstd_affinity_v1_payload(raw):
+        return unpack_mc1_payload_affinity(raw)
 
     payload = msgpack.unpackb(raw, raw=False)
 
@@ -211,6 +236,9 @@ def deserialise_dir(data: bytes) -> MC1DirContainer:
         raw = dctx.decompress(data[5:])
     except zstd.ZstdError as exc:
         raise ValueError(f"Zstandard decompression failed: {exc}") from exc
+
+    if is_zstd_affinity_v1_payload(raw):
+        return unpack_mc1dir_payload_affinity(raw)
 
     payload = msgpack.unpackb(raw, raw=False)
     chunk_size = payload["chunk_size"]

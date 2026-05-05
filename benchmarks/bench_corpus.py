@@ -36,7 +36,13 @@ import zstandard as zstd
 # Add repo root to path so the script works when run from any directory.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from metacompressor.container import _ZSTD_LEVEL, pack_mc1dir_payload  # noqa: E402
+from metacompressor.container import (  # noqa: E402
+    _ZSTD_LEVEL,
+    MAGIC_DIR,
+    VERSION_DIR,
+    pack_mc1dir_payload_affinity,
+    pack_mc1dir_payload_msgpack,
+)
 from metacompressor.corpus import build_corpus_container, compress_corpus  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -218,24 +224,19 @@ def measure_mc_corpus(corpus_dir: Path, use_delta: bool = True) -> tuple[int, fl
     return len(mc_bytes), elapsed
 
 
-def measure_mc_corpus_phased(
+def measure_mc_corpus_phased_msgpack(
     corpus_dir: Path, use_delta: bool = True
 ) -> tuple[int, float, float, float, float]:
-    """Return (archive_size, total_s, transform_s, pack_s, zstd_s) for MC .mc1dir.
-
-    *transform_s* — chunking, dedupe, delta selection (no ZSTD).
-    *pack_s* — ``msgpack.packb`` of the .mc1dir payload map (uncompressed bytes).
-    *zstd_s* — ZSTD of that payload at ``metacompressor.container._ZSTD_LEVEL``.
-    """
+    """Legacy all-msgpack payload: (archive_size, total_s, transform_s, pack_s, zstd_s)."""
     t0 = time.perf_counter()
     container = build_corpus_container(corpus_dir, use_delta=use_delta)
     t1 = time.perf_counter()
-    raw = pack_mc1dir_payload(container)
+    raw = pack_mc1dir_payload_msgpack(container)
     t2 = time.perf_counter()
     cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
     zstd_body = cctx.compress(raw)
     t3 = time.perf_counter()
-    archive = b"MCD\x00" + bytes([0x01]) + zstd_body
+    archive = MAGIC_DIR + bytes([VERSION_DIR]) + zstd_body
     return (
         len(archive),
         t3 - t0,
@@ -243,6 +244,87 @@ def measure_mc_corpus_phased(
         t2 - t1,
         t3 - t2,
     )
+
+
+def measure_mc_corpus_phased(
+    corpus_dir: Path, use_delta: bool = True
+) -> tuple[int, float, float, float, float]:
+    """ZSTD-affinity layout (MCZ1): (archive_size, total_s, transform_s, pack_s, zstd_s)."""
+    t0 = time.perf_counter()
+    container = build_corpus_container(corpus_dir, use_delta=use_delta)
+    t1 = time.perf_counter()
+    raw = pack_mc1dir_payload_affinity(container)
+    t2 = time.perf_counter()
+    cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
+    zstd_body = cctx.compress(raw)
+    t3 = time.perf_counter()
+    archive = MAGIC_DIR + bytes([VERSION_DIR]) + zstd_body
+    return (
+        len(archive),
+        t3 - t0,
+        t1 - t0,
+        t2 - t1,
+        t3 - t2,
+    )
+
+
+def measure_mc_corpus_twostream_zstd(
+    corpus_dir: Path, use_delta: bool = True
+) -> tuple[int, float, float, float, float]:
+    """Experiment: ZSTD(region A) + ZSTD(region B) as separate frames.
+
+    Region A = ``MCZ1`` header through end of raw chunk blob (chunk-first layout).
+    Region B = msgpack metadata + binary delta tail.
+
+    Returns ``(sum_compressed_bytes, pack_s, zstd_meta_s, zstd_blob_s, decode_verify_s)``.
+    Decompress both frames, concatenate, and run :func:`unpack_mc1dir_payload`
+    to verify (not a valid on-disk .mc1dir).
+    """
+    from metacompressor.zstd_affinity_pack_v1 import MCZ1_MAGIC, unpack_mc1dir_payload
+
+    container = build_corpus_container(corpus_dir, use_delta=use_delta)
+    t0 = time.perf_counter()
+    raw = pack_mc1dir_payload_affinity(container)
+    t1 = time.perf_counter()
+    pack_s = t1 - t0
+    if len(raw) < 9 or raw[:4] != MCZ1_MAGIC:
+        raise RuntimeError("expected ZSTD-affinity payload")
+    blob_len = int.from_bytes(raw[5:9], "little")
+    blob_end = 9 + blob_len
+    if blob_end > len(raw):
+        raise RuntimeError("truncated affinity payload")
+    chunk_region = raw[:blob_end]
+    meta_delta_region = raw[blob_end:]
+    cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
+    t2 = time.perf_counter()
+    z_chunk = cctx.compress(chunk_region)
+    t3 = time.perf_counter()
+    z_meta = cctx.compress(meta_delta_region)
+    t4 = time.perf_counter()
+
+    dctx = zstd.ZstdDecompressor()
+    t5 = time.perf_counter()
+    raw_back = dctx.decompress(z_chunk) + dctx.decompress(z_meta)
+    unpack_mc1dir_payload(raw_back)
+    t6 = time.perf_counter()
+    return (
+        len(z_chunk) + len(z_meta),
+        pack_s,
+        t3 - t2,
+        t4 - t3,
+        t6 - t5,
+    )
+
+
+def measure_mc_corpus_decode(corpus_dir: Path, use_delta: bool = True) -> float:
+    """Wall time to ``compress_corpus`` + ``decompress_corpus`` to a temp dir."""
+    from metacompressor.corpus import compress_corpus, decompress_corpus
+
+    t0 = time.perf_counter()
+    archive = compress_corpus(corpus_dir, use_delta=use_delta)
+    with tempfile.TemporaryDirectory() as td:
+        decompress_corpus(archive, Path(td))
+    return time.perf_counter() - t0
 
 
 # ---------------------------------------------------------------------------
@@ -293,16 +375,31 @@ def run_benchmark(corpus_dir: Path) -> None:
     print(f"{_fmt_size(mc_delta_size)}  ({mc_delta_time:.3f}s)")
 
     (
-        _sz_phased,
-        _tot_phased,
+        sz_mp,
+        _tot_mp,
+        transform_mp,
+        pack_msgpack_s,
+        zstd_msgpack_s,
+    ) = measure_mc_corpus_phased_msgpack(corpus_dir, use_delta=True)
+    (
+        sz_aff,
+        _tot_aff,
         transform_s,
-        pack_s,
+        pack_affinity_s,
         zstd_mc_s,
     ) = measure_mc_corpus_phased(corpus_dir, use_delta=True)
-    assert _sz_phased == mc_delta_size
+
+    tw_sum_b, tw_pack_s, tw_zm, tw_zb, tw_dec_verify = measure_mc_corpus_twostream_zstd(
+        corpus_dir, use_delta=True
+    )
+    decode_mc_s = measure_mc_corpus_decode(corpus_dir, use_delta=True)
+
+    ratio_affinity_vs_msgpack_archive_pct = (
+        (sz_aff - sz_mp) / sz_mp * 100.0 if sz_mp else 0.0
+    )
     # Uncompressed payload Shannon entropy (0..8 bits/byte) — rough compressibility hint.
     container = build_corpus_container(corpus_dir, use_delta=True)
-    raw_fp = pack_mc1dir_payload(container)
+    raw_fp = pack_mc1dir_payload_msgpack(container)
     byte_freq = [0] * 256
     for b in raw_fp:
         byte_freq[b] += 1
@@ -342,11 +439,18 @@ def run_benchmark(corpus_dir: Path) -> None:
     print("=" * 76)
 
     print()
-    print("--- MC (+ delta) phased timing (same archive as row above) ---")
+    print("--- Pack + ZSTD (MC + delta, same corpus) ---")
     print(
         f"  transform (chunk/dedupe/delta): {transform_s * 1000:>8.1f} ms\n"
-        f"  msgpack pack (payload):       {pack_s * 1000:>8.1f} ms\n"
-        f"  ZSTD (level {_ZSTD_LEVEL}):               {zstd_mc_s * 1000:>8.1f} ms\n"
+        f"  legacy msgpack pack:            {pack_msgpack_s * 1000:>8.1f} ms  →  archive {_fmt_size(sz_mp)}\n"
+        f"  ZSTD (msgpack payload):         {zstd_msgpack_s * 1000:>8.1f} ms\n"
+        f"  ZSTD-affinity pack (experiment): {pack_affinity_s * 1000:>8.1f} ms  →  archive {_fmt_size(sz_aff)}\n"
+        f"  ZSTD (affinity payload):        {zstd_mc_s * 1000:>8.1f} ms\n"
+        f"  decode (compress+decompress):   {decode_mc_s * 1000:>8.1f} ms\n"
+        f"  affinity archive vs msgpack:    {ratio_affinity_vs_msgpack_archive_pct:>+8.2f}%  (experimental)\n"
+        f"  two-stream sum (experiment):    {_fmt_size(tw_sum_b)}  "
+        f"(pack {tw_pack_s * 1000:.1f} ms, zstd_chunks {tw_zm * 1000:.1f} ms, "
+        f"zstd_meta+delta {tw_zb * 1000:.1f} ms, verify {tw_dec_verify * 1000:.1f} ms)\n"
         f"  packed payload entropy:         {entropy_bits:>8.3f} bits/byte  ({n:,} B raw)"
     )
 
