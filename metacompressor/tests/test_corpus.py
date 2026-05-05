@@ -112,7 +112,9 @@ class TestCorpusDeduplication:
         # Each file compressed independently with ZSTD (per-file baseline)
         import zstandard as zstd
 
-        cctx = zstd.ZstdCompressor(level=3)
+        from metacompressor.container import _ZSTD_LEVEL
+
+        cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
         zstd_total = sum(len(cctx.compress(d)) for d in files.values())
 
         # MC corpus stores the 8 common chunks once instead of three times.
@@ -137,7 +139,9 @@ class TestCorpusDeduplication:
         corpus_dir = make_corpus(tmp_path, files)
         archive = compress_corpus(corpus_dir)
 
-        cctx = zstd.ZstdCompressor(level=3)
+        from metacompressor.container import _ZSTD_LEVEL
+
+        cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
         zstd_total = sum(len(cctx.compress(d)) for d in files.values())
 
         assert len(archive) < zstd_total

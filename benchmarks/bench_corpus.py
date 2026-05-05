@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import math
 import random
 import string
 import sys
@@ -35,7 +36,8 @@ import zstandard as zstd
 # Add repo root to path so the script works when run from any directory.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from metacompressor.corpus import compress_corpus  # noqa: E402
+from metacompressor.container import _ZSTD_LEVEL, pack_mc1dir_payload  # noqa: E402
+from metacompressor.corpus import build_corpus_container, compress_corpus  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Corpus generation
@@ -168,11 +170,9 @@ def generate_corpus(
 # Compression helpers
 # ---------------------------------------------------------------------------
 
-_ZSTD_LEVEL = 3
-
 
 def _zstd_compress(data: bytes) -> bytes:
-    cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
+    cctx = zstd.ZstdCompressor(level=3)
     return cctx.compress(data)
 
 
@@ -216,6 +216,33 @@ def measure_mc_corpus(corpus_dir: Path, use_delta: bool = True) -> tuple[int, fl
     mc_bytes = compress_corpus(corpus_dir, use_delta=use_delta)
     elapsed = time.perf_counter() - t0
     return len(mc_bytes), elapsed
+
+
+def measure_mc_corpus_phased(
+    corpus_dir: Path, use_delta: bool = True
+) -> tuple[int, float, float, float, float]:
+    """Return (archive_size, total_s, transform_s, pack_s, zstd_s) for MC .mc1dir.
+
+    *transform_s* — chunking, dedupe, delta selection (no ZSTD).
+    *pack_s* — ``msgpack.packb`` of the .mc1dir payload map (uncompressed bytes).
+    *zstd_s* — ZSTD of that payload at ``metacompressor.container._ZSTD_LEVEL``.
+    """
+    t0 = time.perf_counter()
+    container = build_corpus_container(corpus_dir, use_delta=use_delta)
+    t1 = time.perf_counter()
+    raw = pack_mc1dir_payload(container)
+    t2 = time.perf_counter()
+    cctx = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
+    zstd_body = cctx.compress(raw)
+    t3 = time.perf_counter()
+    archive = b"MCD\x00" + bytes([0x01]) + zstd_body
+    return (
+        len(archive),
+        t3 - t0,
+        t1 - t0,
+        t2 - t1,
+        t3 - t2,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +292,28 @@ def run_benchmark(corpus_dir: Path) -> None:
     mc_delta_size, mc_delta_time = measure_mc_corpus(corpus_dir, use_delta=True)
     print(f"{_fmt_size(mc_delta_size)}  ({mc_delta_time:.3f}s)")
 
+    (
+        _sz_phased,
+        _tot_phased,
+        transform_s,
+        pack_s,
+        zstd_mc_s,
+    ) = measure_mc_corpus_phased(corpus_dir, use_delta=True)
+    assert _sz_phased == mc_delta_size
+    # Uncompressed payload Shannon entropy (0..8 bits/byte) — rough compressibility hint.
+    container = build_corpus_container(corpus_dir, use_delta=True)
+    raw_fp = pack_mc1dir_payload(container)
+    byte_freq = [0] * 256
+    for b in raw_fp:
+        byte_freq[b] += 1
+    n = len(raw_fp)
+    entropy_bits = 0.0
+    if n:
+        for c in byte_freq:
+            if c:
+                p = c / n
+                entropy_bits -= p * math.log2(p)
+
     def ratio(compressed: int) -> str:
         return f"{raw_size / compressed:.2f}x"
 
@@ -291,6 +340,15 @@ def run_benchmark(corpus_dir: Path) -> None:
         f"{'MC compress-dir (+ delta)':<{col_w}} {_fmt_size(mc_delta_size):>10} {ratio(mc_delta_size):>8} {mc_delta_time:>7.3f}s  {_fmt_delta(mc_delta_size, tar_size)}"
     )
     print("=" * 76)
+
+    print()
+    print("--- MC (+ delta) phased timing (same archive as row above) ---")
+    print(
+        f"  transform (chunk/dedupe/delta): {transform_s * 1000:>8.1f} ms\n"
+        f"  msgpack pack (payload):       {pack_s * 1000:>8.1f} ms\n"
+        f"  ZSTD (level {_ZSTD_LEVEL}):               {zstd_mc_s * 1000:>8.1f} ms\n"
+        f"  packed payload entropy:         {entropy_bits:>8.3f} bits/byte  ({n:,} B raw)"
+    )
 
     delta_gain_bytes = mc_nd_size - mc_delta_size
     delta_gain_pct = delta_gain_bytes / mc_nd_size * 100 if mc_nd_size else 0.0
@@ -323,11 +381,10 @@ def run_benchmark(corpus_dir: Path) -> None:
         print(
             f"  MC (+ delta) is {_fmt_size(overhead_bytes)} ({overhead_pct:.1f}%) LARGER than TAR+ZSTD.\n"
             f"  Explanation: The cross-file deduplication savings from the shared chunk\n"
-            f"  dictionary do not outweigh the overhead of the msgpack container and\n"
-            f"  chunk-boundary fragmentation on this corpus.  TAR+ZSTD benefits from\n"
-            f"  compressing the full concatenated byte stream, which lets zstandard\n"
-            f"  exploit cross-file repetition via its sliding window without the\n"
-            f"  per-chunk framing cost paid by MC."
+            f"  dictionary do not outweigh the framing overhead on this corpus.  TAR+ZSTD\n"
+            f"  benefits from compressing the full concatenated byte stream, which lets\n"
+            f"  zstandard exploit cross-file repetition via its sliding window without\n"
+            f"  the per-chunk dictionary layout paid by MC."
         )
     print()
 

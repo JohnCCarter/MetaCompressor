@@ -236,14 +236,24 @@ class TestBackwardCompatibility:
         import msgpack
         import zstandard as zstd
 
-        from metacompressor.container import _ZSTD_LEVEL, MAGIC, VERSION
+        from metacompressor.container import _ZSTD_LEVEL, MAGIC, VERSION, deserialise
 
         data = b"legacy round-trip test " * 200
         mc1 = compress(data, chunking_mode=CHUNKING_FIXED)
 
-        # Unpack and strip the 'chunking_mode' key to simulate old file
-        raw_payload = zstd.ZstdDecompressor().decompress(mc1[5:])
-        payload = msgpack.unpackb(raw_payload, raw=False)
+        c = deserialise(mc1)
+        sorted_chunks = sorted(c.chunks.items())
+        payload: dict = {
+            "chunk_size": c.chunk_size,
+            "chunks": [[cid, chunk_b] for cid, chunk_b in sorted_chunks],
+            "sequence": c.sequence,
+            "chunking_mode": c.chunking_mode,
+        }
+        if c.delta_chunks:
+            payload["delta_chunks"] = [
+                [cid, base_cid, target_len, diffs]
+                for cid, (base_cid, target_len, diffs) in sorted(c.delta_chunks.items())
+            ]
         del payload["chunking_mode"]
         repackaged = msgpack.packb(payload, use_bin_type=True)
         legacy_mc1 = (

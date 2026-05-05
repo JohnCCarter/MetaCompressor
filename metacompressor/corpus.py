@@ -15,14 +15,63 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from metacompressor.container import (
-    FileEntry,
-    MC1DirContainer,
-    deserialise_dir,
-    serialise_dir,
-)
+from metacompressor.container import deserialise_dir, serialise_dir
 from metacompressor.delta import delta_encoded_size, find_similar_chunk
+from metacompressor.mc1_types import FileEntry, MC1DirContainer
 from metacompressor.utils import CHUNK_SIZE, chunk_data, hash_chunk
+
+
+def build_corpus_container(
+    input_dir: Path,
+    chunk_size: int = CHUNK_SIZE,
+    use_delta: bool = True,
+) -> MC1DirContainer:
+    """Chunk and dedupe *input_dir* into an :class:`MC1DirContainer` (no I/O pack).
+
+    :func:`compress_corpus` is ``serialise_dir(build_corpus_container(...))``.
+    """
+    input_dir = Path(input_dir)
+    if not input_dir.is_dir():
+        raise ValueError(f"Not a directory: {input_dir}")
+
+    hash_to_id: dict[str, int] = {}
+    container = MC1DirContainer(chunk_size=chunk_size)
+    full_id_order: list[int] = []
+    next_id = 0
+
+    all_files = sorted(p for p in input_dir.rglob("*") if p.is_file())
+
+    for file_path in all_files:
+        rel_path = file_path.relative_to(input_dir).as_posix()
+        data = file_path.read_bytes()
+        sequence: list[int] = []
+
+        for chunk in chunk_data(data, chunk_size):
+            h = hash_chunk(chunk)
+            if h not in hash_to_id:
+                cid = next_id
+                next_id += 1
+                hash_to_id[h] = cid
+
+                if use_delta:
+                    delta_result = find_similar_chunk(
+                        chunk, container.chunks, full_id_order
+                    )
+                    if delta_result is not None:
+                        base_id, diffs = delta_result
+                        if delta_encoded_size(diffs) < len(chunk):
+                            container.delta_chunks[cid] = (base_id, len(chunk), diffs)
+                            sequence.append(cid)
+                            continue
+
+                container.chunks[cid] = chunk
+                full_id_order.append(cid)
+
+            sequence.append(hash_to_id[h])
+
+        container.files.append(FileEntry(path=rel_path, sequence=sequence))
+
+    return container
 
 
 def compress_corpus(
@@ -51,7 +100,7 @@ def compress_corpus(
         for compress and decompress; the value is embedded in the archive.
     use_delta:
         When ``True`` (default), attempt intra-chunk delta encoding for
-        near-duplicate chunks.  Set to ``False`` to disable delta encoding
+        near-duplicate chunks.  Set it to ``False`` to disable delta encoding
         and store every unique chunk verbatim — useful for benchmarking or
         when the corpus is known to have low cross-chunk similarity.
 
@@ -65,52 +114,9 @@ def compress_corpus(
     ValueError
         If *input_dir* is not a directory.
     """
-    input_dir = Path(input_dir)
-    if not input_dir.is_dir():
-        raise ValueError(f"Not a directory: {input_dir}")
-
-    hash_to_id: dict[str, int] = {}
-    container = MC1DirContainer(chunk_size=chunk_size)
-    # Insertion-order list of full-chunk IDs (delta base candidates).
-    full_id_order: list[int] = []
-    next_id = 0
-
-    # Collect files in a deterministic order (sorted by relative path).
-    all_files = sorted(p for p in input_dir.rglob("*") if p.is_file())
-
-    for file_path in all_files:
-        rel_path = file_path.relative_to(input_dir).as_posix()
-        data = file_path.read_bytes()
-        sequence: list[int] = []
-
-        for chunk in chunk_data(data, chunk_size):
-            h = hash_chunk(chunk)
-            if h not in hash_to_id:
-                cid = next_id
-                next_id += 1
-                hash_to_id[h] = cid
-
-                # Attempt delta encoding against recent full chunks.
-                if use_delta:
-                    delta_result = find_similar_chunk(
-                        chunk, container.chunks, full_id_order
-                    )
-                    if delta_result is not None:
-                        base_id, diffs = delta_result
-                        if delta_encoded_size(diffs) < len(chunk):
-                            container.delta_chunks[cid] = (base_id, len(chunk), diffs)
-                            sequence.append(cid)
-                            continue
-
-                # Fall back to storing the full chunk.
-                container.chunks[cid] = chunk
-                full_id_order.append(cid)
-
-            sequence.append(hash_to_id[h])
-
-        container.files.append(FileEntry(path=rel_path, sequence=sequence))
-
-    return serialise_dir(container)
+    return serialise_dir(
+        build_corpus_container(input_dir, chunk_size=chunk_size, use_delta=use_delta)
+    )
 
 
 def decompress_corpus(data: bytes, output_dir: Path) -> list[str]:

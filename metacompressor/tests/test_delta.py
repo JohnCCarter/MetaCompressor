@@ -207,16 +207,14 @@ class TestDeltaEncoded:
         data = self._similar_data()
         mc1 = compress(data)
         deserialise(mc1)
-        # deserialise resolves deltas into chunks; verify by checking the raw payload
-        import msgpack
         import zstandard as zstd
 
+        from metacompressor.container_wire import wire_includes_delta_chunks
+
         raw = zstd.ZstdDecompressor().decompress(mc1[5:])
-        payload = msgpack.unpackb(raw, raw=False)
-        assert (
-            "delta_chunks" in payload
-        ), "Expected delta_chunks in payload for similar data"
-        assert len(payload["delta_chunks"]) > 0
+        assert wire_includes_delta_chunks(
+            raw
+        ), "Expected delta metadata on the wire for similar data"
 
     def test_delta_reduces_raw_payload_size(self):
         """For highly similar chunks, delta encoding should reduce the raw payload."""
@@ -245,14 +243,12 @@ class TestDeltaFallback:
         data = os.urandom(CHUNK_SIZE * 20)
         mc1 = compress(data)
 
-        import msgpack
         import zstandard as zstd
 
+        from metacompressor.container_wire import wire_includes_delta_chunks
+
         raw = zstd.ZstdDecompressor().decompress(mc1[5:])
-        payload = msgpack.unpackb(raw, raw=False)
-        assert (
-            "delta_chunks" not in payload or len(payload.get("delta_chunks", [])) == 0
-        )
+        assert not wire_includes_delta_chunks(raw)
 
     def test_fallback_preserves_round_trip(self):
         """Even with mixed similar and dissimilar chunks the round-trip is correct."""
@@ -305,13 +301,12 @@ class TestCorpusDelta:
 
         archive = compress_corpus(corpus_dir)
 
-        import msgpack
         import zstandard as zstd
 
+        from metacompressor.container_wire import wire_includes_delta_chunks
+
         raw = zstd.ZstdDecompressor().decompress(archive[5:])
-        payload = msgpack.unpackb(raw, raw=False)
-        assert "delta_chunks" in payload
-        assert len(payload["delta_chunks"]) > 0
+        assert wire_includes_delta_chunks(raw)
 
     def test_corpus_delta_improves_compression(self, tmp_path):
         """Delta encoding compresses a corpus of similar-but-distinct binary files
