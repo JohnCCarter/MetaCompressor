@@ -11,6 +11,8 @@ import pytest
 import zstandard as zstd
 
 from metacompressor.corpus_template import (
+    _ADAPT_COL_V1,
+    _ADAPT_COL_V2,
     _MODE_COLUMNAR_V1,
     _MODE_COLUMNAR_V2,
     MAGIC,
@@ -246,6 +248,14 @@ class TestMetrics:
             "row_mode_size",
             "columnar_savings_vs_row",
             "final_selected_mode",
+            "candidate_sizes",
+            "selected_mode",
+            "rejected_modes",
+            "selection_reason",
+            "savings_vs_tar_zstd_bytes",
+            "savings_vs_row_bytes",
+            "savings_vs_columnar_bytes",
+            "adaptive_columnar_profile",
         }
         assert expected_keys.issubset(metrics.keys())
 
@@ -374,6 +384,35 @@ class TestStructureExtractionV2:
         _, metrics = compress_corpus_template_with_metrics(corpus_dir)
         assert metrics["template_reuse_after"] > metrics["template_reuse_before"]
 
+    def test_timestamp_prefixed_ndjson_triggers_json_detection(self, tmp_path):
+        """Log lines with a non-JSON prefix before the JSON object must still use JSON extraction."""
+        line_tpl = (
+            '{"service":"api","status":200,"request_id":"user-%d","path":"/v1/ping"}\n'
+        )
+        # Same prefix on every line so the JSON skeleton is shared (varying timestamps in
+        # the prefix would otherwise split templates — still lossless, but not this test).
+        files = {
+            "prefixed.ndjson": b"".join(
+                b"2026-05-04T12:00:00Z " + (line_tpl % i).encode("utf-8")
+                for i in range(8)
+            )
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["json_lines_detected"] == 8
+        assert metrics["num_shared_templates"] >= 1
+        assert metrics["template_reuse_count"] == 8
+        assert metrics["template_reuse_rate"] >= 8 / max(metrics["num_lines"], 1)
+
+    def test_leading_whitespace_before_json_still_parses(self, tmp_path):
+        files = {
+            "spaced.ndjson": b'  {"service":"api","status":200,"id":"a"}\n'
+            b'  {"service":"api","status":500,"id":"b"}\n'
+        }
+        corpus_dir = make_corpus(tmp_path, files)
+        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert metrics["json_lines_detected"] == 2
+
     def test_variable_normalization_v2_maps_semantic_variants_to_same_template(self):
         left = (
             "ts=2026-01-01T00:00:00Z level=INFO request_id=req-abcdef12 user_id=user-42 "
@@ -406,6 +445,11 @@ class TestColumnarMode:
         }
         corpus_dir = make_corpus(tmp_path, files)
         archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        assert (
+            metrics["compressed_size"]
+            == metrics["candidate_sizes"][metrics["selected_mode"]]
+        )
+        assert metrics["selected_mode"] in (_ADAPT_COL_V1, _ADAPT_COL_V2)
         assert metrics["final_selected_mode"] == _MODE_COLUMNAR_V2
 
         out_dir = tmp_path / "out"
@@ -432,8 +476,9 @@ class TestColumnarMode:
         archive1, metrics1 = compress_corpus_template_with_metrics(dir1)
         archive2, metrics2 = compress_corpus_template_with_metrics(dir2)
 
-        assert metrics1["final_selected_mode"] == _MODE_COLUMNAR_V2
-        assert metrics2["final_selected_mode"] == _MODE_COLUMNAR_V2
+        assert metrics1["selected_mode"] == metrics2["selected_mode"]
+        assert metrics1["candidate_sizes"] == metrics2["candidate_sizes"]
+        assert metrics1["final_selected_mode"] == metrics2["final_selected_mode"]
         assert archive1 == archive2
 
     def test_columnar_block_flushing_round_trip(self, monkeypatch, tmp_path):
@@ -454,7 +499,11 @@ class TestColumnarMode:
         )
 
         archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
-        assert metrics["final_selected_mode"] == _MODE_COLUMNAR_V2
+        assert (
+            metrics["compressed_size"]
+            == metrics["candidate_sizes"][metrics["selected_mode"]]
+        )
+        assert metrics["selected_mode"] in (_ADAPT_COL_V1, _ADAPT_COL_V2)
 
         payload = unpack_payload(archive)
         block_lists = [
@@ -578,7 +627,11 @@ class TestColumnarMode:
         files = {"nonl.log": b"\n".join(lines)}
         corpus_dir = make_corpus(tmp_path, files)
         archive, metrics = compress_corpus_template_with_metrics(corpus_dir)
-        assert metrics["final_selected_mode"] == _MODE_COLUMNAR_V2
+        assert (
+            metrics["compressed_size"]
+            == metrics["candidate_sizes"][metrics["selected_mode"]]
+        )
+        assert metrics["selected_mode"] in (_ADAPT_COL_V1, _ADAPT_COL_V2)
         out_dir = tmp_path / "out"
         decompress_corpus_template(archive, out_dir)
         assert (out_dir / "nonl.log").read_bytes() == files["nonl.log"]
