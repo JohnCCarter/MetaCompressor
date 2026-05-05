@@ -368,6 +368,7 @@ def _compress_forced_mode(
     input_dir: Path,
     mode: str,
     structure_v2_enabled: bool = True,
+    zstd_level: int = _ZSTD_LEVEL,
 ) -> Tuple[bytes, Dict[str, Any]]:
     total_start = time.perf_counter()
     context = _prepare_template_context(
@@ -389,6 +390,7 @@ def _compress_forced_mode(
             tok_cache=tok_cache,
             tpl_to_id=tpl_to_id,
             tpl_strings=tpl_strings,
+            zstd_level=zstd_level,
         )
         column_stats = {
             "num_columnar_templates": 0,
@@ -403,6 +405,7 @@ def _compress_forced_mode(
             tok_cache=tok_cache,
             tpl_to_id=tpl_to_id,
             tpl_strings=tpl_strings,
+            zstd_level=zstd_level,
         )
         column_stats = {
             "num_columnar_templates": stats["num_columnar_templates"],
@@ -459,7 +462,7 @@ def _compress_forced_mode(
             "encode_s": stats["encode_s"],
             "extract_s": context["extract_s"],
             "serialize_s": stats["serialize_s"],
-            "zstd_s": 0.0,
+            "zstd_s": stats.get("zstd_s", 0.0),
             "total_s": total_s,
         },
     }
@@ -471,24 +474,30 @@ def _run_mc_mode(
     mode: str,
     work_dir: Path,
     structure_v2_enabled: bool = True,
+    zstd_level: int = _ZSTD_LEVEL,
+    *,
+    verify_determinism: bool = True,
 ) -> Dict[str, Any]:
     work_dir.mkdir(parents=True, exist_ok=True)
     if mode == "auto":
         compress_func = lambda: compress_corpus_template_with_metrics(
             input_dir,
             structure_v2_enabled=structure_v2_enabled,
+            zstd_level=zstd_level,
         )
     elif mode == _MODE_ROW_V1:
         compress_func = lambda: _compress_forced_mode(
             input_dir,
             _MODE_ROW_V1,
             structure_v2_enabled=structure_v2_enabled,
+            zstd_level=zstd_level,
         )
     elif mode in (_MODE_COLUMNAR_V1, _MODE_COLUMNAR_V2):
         compress_func = lambda: _compress_forced_mode(
             input_dir,
             _MODE_COLUMNAR_V2,
             structure_v2_enabled=structure_v2_enabled,
+            zstd_level=zstd_level,
         )
     else:
         raise ValueError("unsupported MC mode: %s" % mode)
@@ -498,12 +507,18 @@ def _run_mc_mode(
     def _compress_once() -> Tuple[bytes, Dict[str, Any]]:
         return compress_func()
 
-    archive, metrics, peak_mb = _measure_peak_mb(_compress_once)
+    if verify_determinism:
+        archive, metrics, peak_mb = _measure_peak_mb(_compress_once)
+    else:
+        archive, metrics = compress_func()
+        peak_mb = 0.0
+
     compress_s = time.perf_counter() - started
 
-    archive_2, _ = compress_func()
-    if archive != archive_2:
-        raise ValidationError("determinism failure for %s" % mode)
+    if verify_determinism:
+        archive_2, _ = compress_func()
+        if archive != archive_2:
+            raise ValidationError("determinism failure for %s" % mode)
 
     out_dir = work_dir / ("restore_%s" % _mode_label(metrics["final_selected_mode"]))
     if out_dir.exists():
@@ -1087,19 +1102,107 @@ def _build_dataset(dataset_dir: Path, spec: DatasetSpec) -> None:
 
 
 def _measure_dataset(
-    dataset_dir: Path, spec: DatasetSpec, work_dir: Path
+    dataset_dir: Path,
+    spec: DatasetSpec,
+    work_dir: Path,
+    *,
+    tar_zstd_level: int = _ZSTD_LEVEL,
+    mc_zstd_level: int = _ZSTD_LEVEL,
+    fast_zstd_level_sweep: bool = False,
 ) -> Dict[str, Any]:
     raw_size = sum(path.stat().st_size for path in _iter_files(dataset_dir))
     methods: Dict[str, Optional[Dict[str, Any]]] = {}
 
+    if fast_zstd_level_sweep:
+        methods["zstd_per_file"] = _run_zstd_per_file(
+            dataset_dir, work_dir / "zstd_per_file"
+        )
+
+        def _tar_zstd_compressor(tar_path: Path, archive_path: Path) -> None:
+            cctx = zstd.ZstdCompressor(level=tar_zstd_level)
+            with tar_path.open("rb") as src, archive_path.open("wb") as dst:
+                cctx.copy_stream(src, dst)
+
+        methods["tar_zstd"] = _run_tar_baseline(
+            dataset_dir,
+            work_dir / "tar_zstd",
+            "tar_zstd",
+            _tar_zstd_compressor,
+            _zstd_tar_decompressor,
+        )
+        methods["gzip"] = None
+        methods["brotli"] = None
+        methods["mc_row_template"] = None
+        methods["mc_columnar_template"] = None
+        methods["mc_final_selected"] = _run_mc_mode(
+            dataset_dir,
+            "auto",
+            work_dir / "mc_final",
+            zstd_level=mc_zstd_level,
+            verify_determinism=False,
+        )
+        methods["mc_before_selected"] = None
+
+        tar_size = methods["tar_zstd"]["size"]  # type: ignore[index]
+        zstd_size = methods["zstd_per_file"]["size"]  # type: ignore[index]
+        final_metrics = methods["mc_final_selected"]["metrics"]  # type: ignore[index]
+        final_size = methods["mc_final_selected"]["size"]  # type: ignore[index]
+
+        column_encoding_counts = final_metrics["column_encoding_counts"]
+        total_column_count = sum(column_encoding_counts.values())
+        delta_tar_pct = _delta_pct(final_size, tar_size)
+        delta_zstd_pct = _delta_pct(final_size, zstd_size)
+        raw_reduction_pct = _raw_reduction_pct(raw_size, final_size)
+
+        return {
+            "name": spec.name,
+            "dataset_type": spec.dataset_type,
+            "realism": spec.realism,
+            "structured": spec.structured,
+            "raw_size": raw_size,
+            "methods": methods,
+            "mc_summary": {
+                "selected_mode": final_metrics["final_selected_mode"],
+                "before_selected_mode": None,
+                "fallback_triggered": bool(final_metrics["chose_raw_fallback"]),
+                "template_count": final_metrics["num_shared_templates"],
+                "template_reuse_rate": final_metrics["template_reuse_rate"],
+                "template_reuse_before": final_metrics["template_reuse_before"],
+                "template_reuse_after": final_metrics["template_reuse_after"],
+                "json_lines_detected": final_metrics["json_lines_detected"],
+                "json_template_count": final_metrics["json_template_count"],
+                "normalized_template_count": final_metrics["normalized_template_count"],
+                "fuzzy_merge_count": final_metrics["fuzzy_merge_count"],
+                "fallback_reason_counts": final_metrics["fallback_reason_counts"],
+                "column_count": total_column_count,
+                "column_encoding_counts": column_encoding_counts,
+                "raw_fallback_lines": final_metrics["raw_fallback_lines"],
+                "raw_fallback_files": final_metrics["low_structure_fallback_files"],
+                "binary_fallback_files": final_metrics["binary_fallback_files"],
+                "before_delta_vs_tar_zstd_pct": None,
+                "delta_vs_tar_zstd_pct": delta_tar_pct,
+                "delta_vs_zstd_per_file_pct": delta_zstd_pct,
+                "reduction_vs_raw_pct": raw_reduction_pct,
+                "verdict": _mode_verdict(
+                    delta_tar_pct if delta_tar_pct is not None else 0.0
+                ),
+            },
+        }
+
     methods["zstd_per_file"] = _run_zstd_per_file(
         dataset_dir, work_dir / "zstd_per_file"
     )
+
+    def _tar_zstd_compressor(tar_path: Path, archive_path: Path) -> None:
+        cctx = zstd.ZstdCompressor(level=tar_zstd_level)
+        with tar_path.open("rb") as src, archive_path.open("wb") as dst:
+            cctx.copy_stream(src, dst)
+
     methods["tar_zstd"] = _run_tar_baseline(
         dataset_dir,
         work_dir / "tar_zstd",
         "tar_zstd",
-        _zstd_tar_compressor,
+        _tar_zstd_compressor,
         _zstd_tar_decompressor,
     )
     methods["gzip"] = _run_tar_baseline(
@@ -1122,21 +1225,23 @@ def _measure_dataset(
         methods["brotli"] = None
 
     methods["mc_row_template"] = _run_mc_mode(
-        dataset_dir, _MODE_ROW_V1, work_dir / "mc_row"
+        dataset_dir, _MODE_ROW_V1, work_dir / "mc_row", zstd_level=mc_zstd_level
     )
     methods["mc_columnar_template"] = _run_mc_mode(
         dataset_dir,
         _MODE_COLUMNAR_V2,
         work_dir / "mc_columnar",
+        zstd_level=mc_zstd_level,
     )
     methods["mc_final_selected"] = _run_mc_mode(
-        dataset_dir, "auto", work_dir / "mc_final"
+        dataset_dir, "auto", work_dir / "mc_final", zstd_level=mc_zstd_level
     )
     methods["mc_before_selected"] = _run_mc_mode(
         dataset_dir,
         "auto",
         work_dir / "mc_before",
         structure_v2_enabled=False,
+        zstd_level=mc_zstd_level,
     )
 
     tar_size = methods["tar_zstd"]["size"]  # type: ignore[index]

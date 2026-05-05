@@ -549,10 +549,15 @@ def _pack_archive_payload(payload: dict, level: int = _ZSTD_LEVEL) -> bytes:
     return MAGIC + bytes([VERSION]) + zstd.ZstdCompressor(level=level).compress(raw)
 
 
-def _build_tarzstd_bytes(input_dir: Path, all_files: List[Path]) -> bytes:
+def _build_tarzstd_bytes(
+    input_dir: Path,
+    all_files: List[Path],
+    *,
+    zstd_level: int = _ZSTD_LEVEL,
+) -> bytes:
     """Return a TAR+ZSTD baseline archive for *all_files*."""
     output = io.BytesIO()
-    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
+    with zstd.ZstdCompressor(level=zstd_level).stream_writer(
         output, closefd=False
     ) as compressor:
         with tarfile.open(fileobj=compressor, mode="w|") as tar:
@@ -901,6 +906,8 @@ def _build_row_template_archive(
     tok_cache: Dict[str, _LineAnalysis],
     tpl_to_id: Dict[Tuple[str, ...], int],
     tpl_strings: List[str],
+    *,
+    zstd_level: int = _ZSTD_LEVEL,
 ) -> Tuple[bytes, dict]:
     """Build the legacy row-oriented template archive."""
     template_reuse_count = 0
@@ -915,7 +922,8 @@ def _build_row_template_archive(
     output.write(MAGIC + bytes([VERSION]))
     packer = msgpack.Packer(use_bin_type=True)
 
-    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
+    t_zstd_start = time.perf_counter()
+    with zstd.ZstdCompressor(level=zstd_level).stream_writer(
         output, closefd=False
     ) as compressor:
         compressor.write(packer.pack_map_header(2))
@@ -986,6 +994,7 @@ def _build_row_template_archive(
                     else:
                         compressor.write(packer.pack([tpl_id, list(analysis.values)]))
 
+    t_zstd_s = time.perf_counter() - t_zstd_start
     t_serialize_s = time.perf_counter() - t_serialize_start
     t_encode_s = time.perf_counter() - t_encode_start
     return output.getvalue(), {
@@ -996,6 +1005,7 @@ def _build_row_template_archive(
         "total_var_slots": total_var_slots,
         "serialize_s": t_serialize_s,
         "encode_s": t_encode_s,
+        "zstd_s": t_zstd_s,
         "fallback_reason_counts": fallback_reason_counts,
     }
 
@@ -1040,13 +1050,16 @@ def _pack_columnar_archive(
     template_blocks: List[Optional[List[dict]]],
     raw_files: List[bytes],
     raw_lines: List[List[Any]],
-) -> bytes:
+    *,
+    zstd_level: int = _ZSTD_LEVEL,
+) -> Tuple[bytes, float]:
     """Pack the columnar payload without staging a full msgpack blob in RAM."""
     output = io.BytesIO()
     output.write(MAGIC + bytes([VERSION]))
     packer = msgpack.Packer(use_bin_type=True)
 
-    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
+    t_zstd_start = time.perf_counter()
+    with zstd.ZstdCompressor(level=zstd_level).stream_writer(
         output, closefd=False
     ) as compressor:
         compressor.write(packer.pack_map_header(6))
@@ -1071,7 +1084,8 @@ def _pack_columnar_archive(
         for raw_line in raw_lines:
             compressor.write(packer.pack(raw_line))
 
-    return output.getvalue()
+    zstd_s = time.perf_counter() - t_zstd_start
+    return output.getvalue(), zstd_s
 
 
 def _build_columnar_template_archive(
@@ -1080,6 +1094,8 @@ def _build_columnar_template_archive(
     tok_cache: Dict[str, _LineAnalysis],
     tpl_to_id: Dict[Tuple[str, ...], int],
     tpl_strings: List[str],
+    *,
+    zstd_level: int = _ZSTD_LEVEL,
 ) -> Tuple[bytes, dict]:
     """Build the block-flushed columnar corpus-template archive."""
     template_reuse_count = 0
@@ -1215,13 +1231,14 @@ def _build_columnar_template_archive(
             continue
         num_columnar_templates += 1
 
-    result = _pack_columnar_archive(
+    result, columnar_zstd_s = _pack_columnar_archive(
         mode=_MODE_COLUMNAR_V2,
         tpl_strings=tpl_strings,
         files_payload=files_payload,
         template_blocks=template_blocks,
         raw_files=raw_files,
         raw_lines=raw_lines,
+        zstd_level=zstd_level,
     )
     t_serialize_s = time.perf_counter() - t_serialize_start
     t_encode_s = time.perf_counter() - t_encode_start
@@ -1233,6 +1250,7 @@ def _build_columnar_template_archive(
         "total_var_slots": total_var_slots,
         "serialize_s": t_serialize_s,
         "encode_s": t_encode_s,
+        "zstd_s": columnar_zstd_s,
         "num_columnar_templates": num_columnar_templates,
         "num_encoded_columns": num_encoded_columns,
         "column_encoding_counts": column_encoding_counts,
@@ -1262,6 +1280,7 @@ def _template_reuse_rate(
 def compress_corpus_template(
     input_dir: Path,
     structure_v2_enabled: bool = True,
+    zstd_level: int = _ZSTD_LEVEL,
 ) -> bytes:
     """Compress all files under *input_dir* using a shared template dictionary.
 
@@ -1270,12 +1289,14 @@ def compress_corpus_template(
     return compress_corpus_template_with_metrics(
         input_dir,
         structure_v2_enabled=structure_v2_enabled,
+        zstd_level=zstd_level,
     )[0]
 
 
 def compress_corpus_template_with_metrics(
     input_dir: Path,
     structure_v2_enabled: bool = True,
+    zstd_level: int = _ZSTD_LEVEL,
 ) -> Tuple[bytes, dict]:
     """Compress all files under *input_dir* using a shared template dictionary.
 
@@ -1484,6 +1505,7 @@ def compress_corpus_template_with_metrics(
         tok_cache=tok_cache,
         tpl_to_id=tpl_to_id,
         tpl_strings=tpl_strings,
+        zstd_level=zstd_level,
     )
     columnar_result, columnar_stats = _build_columnar_template_archive(
         all_files=all_files,
@@ -1491,6 +1513,7 @@ def compress_corpus_template_with_metrics(
         tok_cache=tok_cache,
         tpl_to_id=tpl_to_id,
         tpl_strings=tpl_strings,
+        zstd_level=zstd_level,
     )
 
     t_encode_s = row_stats["encode_s"] + columnar_stats["encode_s"]
@@ -1506,7 +1529,9 @@ def compress_corpus_template_with_metrics(
     # re-encode as raw_tar_zstd mode so the caller never receives an archive
     # worse than TAR+ZSTD by more than a few dozen bytes of MCK overhead.
     # -----------------------------------------------------------------------
-    tarzstd_bytes = _build_tarzstd_bytes(input_dir, all_files)
+    t_tar_zstd_start = time.perf_counter()
+    tarzstd_bytes = _build_tarzstd_bytes(input_dir, all_files, zstd_level=zstd_level)
+    t_tar_zstd_s = time.perf_counter() - t_tar_zstd_start
     tarzstd_size = len(tarzstd_bytes)
 
     row_mode_size = len(row_result)
@@ -1519,21 +1544,26 @@ def compress_corpus_template_with_metrics(
         best_template_mode = _MODE_ROW_V1
 
     if len(best_template_result) > tarzstd_size * _CORPUS_FALLBACK_THRESHOLD:
+        t_wrap_start = time.perf_counter()
         result = _build_raw_tarzstd_archive(tarzstd_bytes)
+        t_wrap_s = time.perf_counter() - t_wrap_start
         final_selected_mode = _MODE_RAW_TAR_ZSTD
         chose_raw_fallback = True
         fallback_reason_counts = dict(row_stats["fallback_reason_counts"])
         fallback_reason_counts["raw_tar_zstd"] = (
             fallback_reason_counts.get("raw_tar_zstd", 0) + 1
         )
+        t_zstd_s = t_tar_zstd_s + t_wrap_s
     else:
         result = best_template_result
         final_selected_mode = best_template_mode
         chose_raw_fallback = False
         if best_template_mode == _MODE_COLUMNAR_V2:
             fallback_reason_counts = dict(columnar_stats["fallback_reason_counts"])
+            t_zstd_s = columnar_stats["zstd_s"]
         else:
             fallback_reason_counts = dict(row_stats["fallback_reason_counts"])
+            t_zstd_s = row_stats["zstd_s"]
 
     t_total_s = time.perf_counter() - t_total_start
 
@@ -1579,6 +1609,7 @@ def compress_corpus_template_with_metrics(
         "row_mode_size": row_mode_size,
         "columnar_savings_vs_row": row_mode_size - columnar_size,
         "final_selected_mode": final_selected_mode,
+        "zstd_level": zstd_level,
         "timing": {
             "tokenize_s": t_tokenize_s,
             "count_s": t_count_s,
