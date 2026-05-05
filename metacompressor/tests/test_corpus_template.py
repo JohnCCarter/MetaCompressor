@@ -339,7 +339,9 @@ class TestMetrics:
             )
         }
         corpus_dir = make_corpus(tmp_path, files)
-        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        _, metrics = compress_corpus_template_with_metrics(
+            corpus_dir, compute_legacy_metrics=True
+        )
         assert metrics["structure_v2_enabled"] is True
         assert metrics["json_lines_detected"] >= 2
         assert metrics["json_template_count"] >= 1
@@ -371,7 +373,9 @@ class TestStructureExtractionV2:
             )
         }
         corpus_dir = make_corpus(tmp_path, files)
-        _, metrics = compress_corpus_template_with_metrics(corpus_dir)
+        _, metrics = compress_corpus_template_with_metrics(
+            corpus_dir, compute_legacy_metrics=True
+        )
         assert metrics["template_reuse_after"] > metrics["template_reuse_before"]
 
     def test_variable_normalization_v2_maps_semantic_variants_to_same_template(self):

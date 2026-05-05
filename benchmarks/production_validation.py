@@ -481,6 +481,7 @@ def _run_mc_mode(
         compress_func = lambda: compress_corpus_template_with_metrics(
             input_dir,
             structure_v2_enabled=structure_v2_enabled,
+            compute_legacy_metrics=True,
         )
     elif mode == _MODE_ROW_V1:
         compress_func = lambda: _compress_forced_mode(

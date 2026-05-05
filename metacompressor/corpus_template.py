@@ -222,6 +222,20 @@ _GENERIC_VAR_PATTERNS = [
     ("number", _NUMBER_RE),
 ]
 
+# Single combined alternation across the 11 generic patterns above.  Python
+# re's alternation returns the FIRST listed alternative that matches at the
+# leftmost position; the order above is from longest-to-shortest practical
+# match, which matches the per-position "longest wins" tie-break that the
+# legacy multi-search loop applied.  A golden differential test
+# (``test_tokenizer_golden.py``) asserts per-line equivalence across a
+# representative corpus.
+_COMBINED_VAR_RE = re.compile(
+    "|".join(
+        "(?P<%s>%s)" % (kind, pattern.pattern)
+        for kind, pattern in _GENERIC_VAR_PATTERNS
+    )
+)
+
 
 def _tokenize_legacy(line: str) -> Tuple[Tuple[str, ...], List[str]]:
     """Return the legacy structure-extraction split for *line*."""
@@ -264,35 +278,27 @@ def _normalized_skeleton(
     return tuple(skeleton)
 
 
+_JSON_WS_RE = re.compile(r"[ \t\r\n]*")
+_JSON_STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"', re.DOTALL)
+_JSON_NUMBER_RE = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?")
+
+
 def _json_skip_ws(text: str, index: int) -> int:
-    while index < len(text) and text[index] in " \t\r\n":
-        index += 1
-    return index
+    return _JSON_WS_RE.match(text, index).end()
 
 
 def _json_parse_string(text: str, index: int) -> int:
-    if index >= len(text) or text[index] != '"':
+    match = _JSON_STRING_RE.match(text, index)
+    if match is None:
         raise ValueError("expected JSON string")
-    index += 1
-    while index < len(text):
-        char = text[index]
-        if char == "\\":
-            index += 2
-            continue
-        if char == '"':
-            return index + 1
-        index += 1
-    raise ValueError("unterminated JSON string")
+    return match.end()
 
 
 def _json_parse_number(text: str, index: int) -> int:
-    match = re.match(
-        r"-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?",
-        text[index:],
-    )
+    match = _JSON_NUMBER_RE.match(text, index)
     if match is None:
         raise ValueError("invalid JSON number")
-    return index + match.end()
+    return match.end()
 
 
 def _json_collect_leaves(
@@ -437,7 +443,14 @@ def _analyze_json_line(line: str) -> Optional[_LineAnalysis]:
     )
 
 
-def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]:
+def _find_next_variable_legacy(
+    line: str, start: int
+) -> Optional[Tuple[int, int, str]]:
+    """Reference implementation kept only for the golden differential test.
+
+    Calls 12 separate regex searches per cursor position.  The production
+    path uses :func:`_find_next_variable` with a single combined regex.
+    """
     best: Optional[Tuple[int, int, str]] = None
 
     key_match = _KEY_VALUE_RE.search(line, start)
@@ -453,6 +466,30 @@ def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]
         if match is None:
             continue
         candidate = (match.start(), match.end(), kind)
+        if (
+            best is None
+            or candidate[0] < best[0]
+            or (candidate[0] == best[0] and candidate[1] > best[1])
+        ):
+            best = candidate
+
+    return best
+
+
+def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]:
+    best: Optional[Tuple[int, int, str]] = None
+
+    key_match = _KEY_VALUE_RE.search(line, start)
+    if key_match is not None:
+        best = (
+            key_match.start("value"),
+            key_match.end("value"),
+            "kv:%s" % key_match.group("key").lower(),
+        )
+
+    generic_match = _COMBINED_VAR_RE.search(line, start)
+    if generic_match is not None:
+        candidate = (generic_match.start(), generic_match.end(), generic_match.lastgroup)
         if (
             best is None
             or candidate[0] < best[0]
@@ -1274,6 +1311,7 @@ def _template_reuse_rate(
 def compress_corpus_template(
     input_dir: Path,
     structure_v2_enabled: bool = True,
+    compute_legacy_metrics: bool = False,
 ) -> bytes:
     """Compress all files under *input_dir* using a shared template dictionary.
 
@@ -1282,12 +1320,14 @@ def compress_corpus_template(
     return compress_corpus_template_with_metrics(
         input_dir,
         structure_v2_enabled=structure_v2_enabled,
+        compute_legacy_metrics=compute_legacy_metrics,
     )[0]
 
 
 def compress_corpus_template_with_metrics(
     input_dir: Path,
     structure_v2_enabled: bool = True,
+    compute_legacy_metrics: bool = False,
 ) -> Tuple[bytes, dict]:
     """Compress all files under *input_dir* using a shared template dictionary.
 
@@ -1394,6 +1434,13 @@ def compress_corpus_template_with_metrics(
     # O(unique_lines × avg_line_len) instead of O(total_lines × avg_line_len).
     line_intern: Dict[str, str] = {}
 
+    # The legacy tokeniser only feeds the explainability metric
+    # ``template_reuse_before``.  Skip it on the hot path unless the caller
+    # explicitly requests legacy metrics or has disabled structure_v2 (in
+    # which case _LineAnalysis falls back to legacy_tok_cache to build its
+    # template_parts).
+    legacy_needed = compute_legacy_metrics or not structure_v2_enabled
+
     # tok_cache: unique line → (template_key, variable_values).
     # One regex call per *unique* line; for repetitive corpora this reduces
     # O(N) regex splits to O(distinct lines), typically a handful.
@@ -1421,12 +1468,13 @@ def compress_corpus_template_with_metrics(
                 line = line_intern.setdefault(raw_line, raw_line)
                 cached_lines.append(line)
                 file_total_lines += 1
-                if line not in legacy_tok_cache:
-                    legacy_tok_cache[line] = _tokenize_legacy(line)
-                legacy_tkey = legacy_tok_cache[line][0]
-                file_legacy_tpl_count[legacy_tkey] = (
-                    file_legacy_tpl_count.get(legacy_tkey, 0) + 1
-                )
+                if legacy_needed:
+                    if line not in legacy_tok_cache:
+                        legacy_tok_cache[line] = _tokenize_legacy(line)
+                    legacy_tkey = legacy_tok_cache[line][0]
+                    file_legacy_tpl_count[legacy_tkey] = (
+                        file_legacy_tpl_count.get(legacy_tkey, 0) + 1
+                    )
 
                 if line not in tok_cache:
                     tok_cache[line] = (
@@ -1569,7 +1617,9 @@ def compress_corpus_template_with_metrics(
         total_var_slots / template_reuse_count if template_reuse_count > 0 else 0.0
     )
     reuse_rate = template_reuse_count / total_lines if total_lines > 0 else 0.0
-    template_reuse_before = _template_reuse_rate(legacy_tpl_count, total_lines)
+    template_reuse_before = (
+        _template_reuse_rate(legacy_tpl_count, total_lines) if legacy_needed else None
+    )
     template_reuse_after = _template_reuse_rate(tpl_count, total_lines)
 
     metrics = {
