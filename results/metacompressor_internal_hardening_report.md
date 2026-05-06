@@ -6,36 +6,35 @@
 
 | Dataset | Raw | MC corpus-template | TAR+ZSTD | Delta % | Per-file ZSTD | gzip | brotli | Compress s | Decomp s | Peak MB | Winner | Notes |
 |---------|----:|-------------------:|---------:|-------:|-------------:|-----:|-------:|-----------:|---------:|--------:|--------|-------|
-| H-2000_small_files | 152,679 | 2,151 | 38,928 | -94.5% | 145,326 | 53,943 | — | 2.220s | 0.081s | 11.4 MB | MC | 2 000 small files; tpl_reuse=1.00; files=2000 |
-| H-mixed_app_logs | 146,392 | 4,795 | 9,804 | -51.1% | 7,711 | 13,943 | — | 0.107s | 0.005s | — | MC | 4 app log formats; tpl_reuse=1.00; templates=7 |
-| H-nginx_10k | 1,183,385 | 26,509 | 116,127 | -77.2% | 115,972 | 156,898 | — | 0.660s | 0.033s | — | MC | 10 000 nginx lines; tpl_reuse=1.00; templates=1; low_struct_fb=0 |
-| H-prose | 184,915 | 42,289 | 40,787 | 3.7% | 40,581 | 35,490 | — | — | — | — | gzip | prose text; tpl_reuse=0.00; binary_fb=1; low_struct_fb=0 |
+| H-2000_small_files | 152,679 | 2,151 | 40,032 | -94.6% | 145,326 | 55,139 | — | 2.137s | 0.574s | 11.3 MB | MC | 2 000 small files; tpl_reuse=1.00; files=2000 |
+| H-mixed_app_logs | 146,392 | 4,795 | 9,794 | -51.0% | 7,711 | 13,941 | — | 0.080s | 0.009s | — | MC | 4 app log formats; tpl_reuse=1.00; templates=7 |
+| H-nginx_10k | 1,183,385 | 26,509 | 116,132 | -77.2% | 115,972 | 156,895 | — | 0.482s | 0.043s | — | MC | 10 000 nginx lines; tpl_reuse=1.00; templates=1; low_struct_fb=0 |
+| H-prose | 184,915 | 42,289 | 40,782 | 3.7% | 40,581 | 35,489 | — | — | — | — | gzip | prose text; tpl_reuse=0.00; binary_fb=1; low_struct_fb=0 |
 | H-low_struct_fallback | — | — | — | — | — | — | — | — | — | — | — | low-structure fallback fires; low_struct_fb=1 |
-| H-low_struct_size | — | 520 | 569 | -8.6% | 394 | — | — | — | — | — | per-file-zstd | low-struct size test; Δ=-8.6%; low_struct_fb=1 |
-| H-highcard_2k | 170,690 | 39,349 | 43,366 | -9.3% | 43,199 | 45,009 | — | — | — | — | MC | 2000 lines; recurring tpl; random vals; tpl_reuse=0.42; Δ=-9.3% |
-| H-random_binary_mix | 470,304 | 98,856 | 98,824 | 0.0% | 98,485 | — | — | — | — | — | per-file-zstd | random+structured mix; binary_fb=2; tpl_reuse=1.00 |
+| H-low_struct_size | — | 520 | 567 | -8.3% | 394 | — | — | — | — | — | per-file-zstd | low-struct size test; Δ=-8.3%; low_struct_fb=1 |
+| H-highcard_2k | 170,690 | 43,061 | 43,433 | -0.9% | 43,252 | 44,932 | — | — | — | — | MC | 2000 lines; recurring tpl; random vals; tpl_reuse=0.45; Δ=-0.9% |
+| H-random_binary_mix | 470,304 | 98,856 | 98,828 | 0.0% | 98,485 | — | — | — | — | — | per-file-zstd | random+structured mix; binary_fb=2; tpl_reuse=1.00 |
 | H-precompressed_mix | 40,177 | 324 | 450 | -28.0% | 249 | — | — | — | — | — | per-file-zstd | gz+zst+log; binary_fb=2; tpl_reuse=1.00 |
 | H-binary_fb_lossless | — | — | — | — | — | — | — | — | — | — | — | 20 random-binary files; all must round-trip without corruption |
 | H-hybrid_fb_lossless | — | — | — | — | — | — | — | — | — | — | — | 50 unique-template lines → hybrid fallback → lossless |
 | H-low_struct_fb_lossless | — | — | — | — | — | — | — | — | — | — | — | ~3% template rate → low-structure fallback; low_struct_fb=1 |
 | H-no_silent_corruption_large | — | — | — | — | — | — | — | — | — | — | — | corrupt archive raised exception (correct) |
-| H-reg_mixed_app_logs | — | 4,795 | 9,692 | -50.5% | — | — | — | — | — | — | MC | Δ=-50.5% – within threshold |
-| H-reg_2000_small | — | 2,151 | 39,515 | -94.6% | — | — | — | — | — | — | MC | Δ=-94.6% – within threshold |
-| H-reg_prose | — | 42,289 | 40,787 | 3.7% | — | — | — | — | — | — | TAR+ZSTD | Δ=3.7% – within threshold |
+| H-reg_mixed_app_logs | — | 4,795 | 9,701 | -50.6% | — | — | — | — | — | — | MC | Δ=-50.6% – within threshold |
+| H-reg_2000_small | — | 2,151 | 40,565 | -94.7% | — | — | — | — | — | — | MC | Δ=-94.7% – within threshold |
+| H-reg_prose | — | 42,289 | 40,786 | 3.7% | — | — | — | — | — | — | TAR+ZSTD | Δ=3.7% – within threshold |
 | H-reg_random_binary | — | 65,602 | 65,720 | -0.2% | — | — | — | — | — | — | MC | Δ=-0.2% – within threshold |
 | H-determinism_10mb | — | 400 | — | — | — | — | — | — | — | — | MC | two independent compressions of identical 10 MB corpus → identical bytes |
 | H-determinism_200files | — | 611 | — | — | — | — | — | — | — | — | MC | 200 small files, two runs → identical bytes |
 
 ## Where MC Wins
 
-- **H-2000_small_files**: MC=2,151 vs TAR+ZSTD=38,928 (Δ=-94.5%)  2 000 small files; tpl_reuse=1.00; files=2000
-- **H-mixed_app_logs**: MC=4,795 vs TAR+ZSTD=9,804 (Δ=-51.1%)  4 app log formats; tpl_reuse=1.00; templates=7
-- **H-nginx_10k**: MC=26,509 vs TAR+ZSTD=116,127 (Δ=-77.2%)  10 000 nginx lines; tpl_reuse=1.00; templates=1; low_struct_fb=0
-- **H-low_struct_size**: MC=520 vs TAR+ZSTD=569 (Δ=-8.6%)  low-struct size test; Δ=-8.6%; low_struct_fb=1
-- **H-highcard_2k**: MC=39,349 vs TAR+ZSTD=43,366 (Δ=-9.3%)  2000 lines; recurring tpl; random vals; tpl_reuse=0.42; Δ=-9.3%
+- **H-2000_small_files**: MC=2,151 vs TAR+ZSTD=40,032 (Δ=-94.6%)  2 000 small files; tpl_reuse=1.00; files=2000
+- **H-mixed_app_logs**: MC=4,795 vs TAR+ZSTD=9,794 (Δ=-51.0%)  4 app log formats; tpl_reuse=1.00; templates=7
+- **H-nginx_10k**: MC=26,509 vs TAR+ZSTD=116,132 (Δ=-77.2%)  10 000 nginx lines; tpl_reuse=1.00; templates=1; low_struct_fb=0
+- **H-low_struct_size**: MC=520 vs TAR+ZSTD=567 (Δ=-8.3%)  low-struct size test; Δ=-8.3%; low_struct_fb=1
 - **H-precompressed_mix**: MC=324 vs TAR+ZSTD=450 (Δ=-28.0%)  gz+zst+log; binary_fb=2; tpl_reuse=1.00
-- **H-reg_mixed_app_logs**: MC=4,795 vs TAR+ZSTD=9,692 (Δ=-50.5%)  Δ=-50.5% – within threshold
-- **H-reg_2000_small**: MC=2,151 vs TAR+ZSTD=39,515 (Δ=-94.6%)  Δ=-94.6% – within threshold
+- **H-reg_mixed_app_logs**: MC=4,795 vs TAR+ZSTD=9,701 (Δ=-50.6%)  Δ=-50.6% – within threshold
+- **H-reg_2000_small**: MC=2,151 vs TAR+ZSTD=40,565 (Δ=-94.7%)  Δ=-94.7% – within threshold
 
 **Why MC wins:** Highly repetitive or structured corpora allow the shared template dictionary to deduplicate line structure across many files. When the same log template recurs thousands of times, storing it once and encoding only the variable slots achieves large savings beyond what generic ZSTD compression can achieve, especially for many-small-file corpora where tar overhead dominates TAR+ZSTD.
 
@@ -94,7 +93,7 @@ Peak memory scales with corpus size. For highly repetitive data the tokenisation
 ## Summary
 
 - Total tests recorded : 19
-- MC wins (Δ < -5%)   : 8
+- MC wins (Δ < -5%)   : 7
 - MC losses (Δ > +5%) : 0
 - Crashes              : 0
 - Regressions (> 10%) : 0

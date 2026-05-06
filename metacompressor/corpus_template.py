@@ -102,6 +102,22 @@ from concurrent.futures import ProcessPoolExecutor
 
 from metacompressor.container import _zstd_threads
 
+# Optional native tokenizer (Rust extension via PyO3).  When present,
+# _scan_text_line dispatches to a C-fast implementation that scans for
+# variables and computes the normalized skeleton in one FFI call.
+# The Rust path is differential-tested against the Python path in
+# tests/test_tokenizer_golden.py so output bytes are byte-identical.
+# Set MC_DISABLE_NATIVE_TOKENIZER=1 to force the Python path even when
+# the extension is installed (useful for benchmarking and fixture
+# stability).
+try:
+    if os.environ.get("MC_DISABLE_NATIVE_TOKENIZER", "").strip() in ("1", "true", "True"):
+        _NATIVE_TOKENIZER = None  # type: ignore[assignment]
+    else:
+        import mc_tokenizer_rs as _NATIVE_TOKENIZER  # type: ignore[import-not-found]
+except ImportError:
+    _NATIVE_TOKENIZER = None  # type: ignore[assignment]
+
 # ---------------------------------------------------------------------------
 # Format constants
 # ---------------------------------------------------------------------------
@@ -504,6 +520,8 @@ def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]
 
 def _scan_text_line(line: str) -> _LineAnalysis:
     """Extract a deterministic template and column values from a text line."""
+    if _NATIVE_TOKENIZER is not None:
+        return _scan_text_line_native(line)
     parts: List[str] = []
     values: List[str] = []
     value_kinds: List[str] = []
@@ -527,6 +545,19 @@ def _scan_text_line(line: str) -> _LineAnalysis:
         values=values,
         normalized_skeleton=_normalized_skeleton(template_parts, value_kind_tuple, ()),
         value_kinds=value_kind_tuple,
+        is_json=False,
+        json_structure_key=(),
+    )
+
+
+def _scan_text_line_native(line: str) -> _LineAnalysis:
+    """Native (Rust) implementation: scan + skeleton in one FFI call."""
+    parts, values, kinds, skeleton = _NATIVE_TOKENIZER.analyze_text(line)
+    return _LineAnalysis(
+        template_parts=tuple(parts),
+        values=values,
+        normalized_skeleton=tuple(skeleton),
+        value_kinds=tuple(kinds),
         is_json=False,
         json_structure_key=(),
     )

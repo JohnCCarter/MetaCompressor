@@ -93,17 +93,22 @@ def test_combined_regex_matches_legacy_per_line():
     """Each fixture line must produce the same _LineAnalysis under both
     implementations of _find_next_variable.
 
-    The test temporarily swaps the production function with the legacy
-    reference and re-runs _scan_text_line, then restores it.
+    The test temporarily forces the Python path (so legacy and combined
+    are compared on equal footing without the native dispatch in
+    _scan_text_line interfering) and the production combined-regex path,
+    then restores both.
     """
+    saved_native = ct._NATIVE_TOKENIZER
     saved_find = ct._find_next_variable
     try:
+        ct._NATIVE_TOKENIZER = None  # force the pure-Python scan path
         ct._find_next_variable = ct._find_next_variable_legacy
         legacy_results = [_scan_text_line(line) for line in FIXTURE_LINES]
-    finally:
         ct._find_next_variable = saved_find
-
-    new_results = [_scan_text_line(line) for line in FIXTURE_LINES]
+        new_results = [_scan_text_line(line) for line in FIXTURE_LINES]
+    finally:
+        ct._NATIVE_TOKENIZER = saved_native
+        ct._find_next_variable = saved_find
 
     for line, legacy, new in zip(FIXTURE_LINES, legacy_results, new_results):
         assert new.template_parts == legacy.template_parts, (
@@ -120,4 +125,48 @@ def test_combined_regex_matches_legacy_per_line():
             f"value_kinds mismatch on line {line!r}\n"
             f"  legacy: {legacy.value_kinds}\n"
             f"  new:    {new.value_kinds}"
+        )
+
+
+def test_native_tokenizer_matches_python_per_line():
+    """When the native (Rust) tokenizer is installed, its output for each
+    fixture line must be byte-identical to the pure-Python path.
+
+    Skipped when ``mc_tokenizer_rs`` is not importable so non-x86_64-Linux
+    contributors don't see false failures.
+    """
+    import pytest
+
+    if ct._NATIVE_TOKENIZER is None:
+        pytest.skip("mc_tokenizer_rs native extension not installed")
+
+    saved_native = ct._NATIVE_TOKENIZER
+    try:
+        ct._NATIVE_TOKENIZER = None  # force Python path for reference
+        py_results = [_scan_text_line(line) for line in FIXTURE_LINES]
+        ct._NATIVE_TOKENIZER = saved_native  # native path
+        rs_results = [_scan_text_line(line) for line in FIXTURE_LINES]
+    finally:
+        ct._NATIVE_TOKENIZER = saved_native
+
+    for line, py, rs in zip(FIXTURE_LINES, py_results, rs_results):
+        assert rs.template_parts == py.template_parts, (
+            f"template_parts mismatch on line {line!r}\n"
+            f"  python: {py.template_parts}\n"
+            f"  rust:   {rs.template_parts}"
+        )
+        assert rs.values == py.values, (
+            f"values mismatch on line {line!r}\n"
+            f"  python: {py.values}\n"
+            f"  rust:   {rs.values}"
+        )
+        assert rs.value_kinds == py.value_kinds, (
+            f"value_kinds mismatch on line {line!r}\n"
+            f"  python: {py.value_kinds}\n"
+            f"  rust:   {rs.value_kinds}"
+        )
+        assert rs.normalized_skeleton == py.normalized_skeleton, (
+            f"normalized_skeleton mismatch on line {line!r}\n"
+            f"  python: {py.normalized_skeleton}\n"
+            f"  rust:   {rs.normalized_skeleton}"
         )

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["maturin>=1.0"]
+build-backend = "maturin"
+
+[project]
+name = "mc-tokenizer-rs"
+version = "0.1.0"
+description = "Native tokenizer for MetaCompressor template extraction"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "mc_tokenizer_rs"
