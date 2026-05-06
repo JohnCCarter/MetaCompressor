@@ -1,0 +1,40 @@
+name: Update mc_tokenizer_rs Cargo.lock
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to update (branch or SHA)"
+        required: true
+        default: "main"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Update lockfile
+        working-directory: mc_tokenizer_rs
+        run: cargo update -p pyo3
+
+      - name: Commit lockfile changes (if any)
+        run: |
+          git status --porcelain
+          if git diff --quiet -- mc_tokenizer_rs/Cargo.lock; then
+            echo "No lockfile changes."
+            exit 0
+          fi
+          git add mc_tokenizer_rs/Cargo.lock
+          git commit -m "chore(mc_tokenizer_rs): update Cargo.lock for pyo3 patch"
+          git push origin HEAD
