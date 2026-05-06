@@ -86,19 +86,22 @@ decompress_corpus_template(data, output_dir)            -> list[str]
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import io
 import os
 import re
+import sys
 import tarfile
 import time
 from collections.abc import Iterator
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import msgpack
 import zstandard as zstd
-from concurrent.futures import ProcessPoolExecutor
 
 from metacompressor.container import _zstd_threads
 
@@ -111,12 +114,59 @@ from metacompressor.container import _zstd_threads
 # the extension is installed (useful for benchmarking and fixture
 # stability).
 try:
-    if os.environ.get("MC_DISABLE_NATIVE_TOKENIZER", "").strip() in ("1", "true", "True"):
+    if os.environ.get("MC_DISABLE_NATIVE_TOKENIZER", "").strip() in (
+        "1",
+        "true",
+        "True",
+    ):
         _NATIVE_TOKENIZER = None  # type: ignore[assignment]
     else:
         import mc_tokenizer_rs as _NATIVE_TOKENIZER  # type: ignore[import-not-found]
 except ImportError:
     _NATIVE_TOKENIZER = None  # type: ignore[assignment]
+else:
+
+    def _load_mc_tokenizer_extension() -> object | None:
+        """Best-effort load of the compiled extension even if a namespace package shadows it.
+
+        If the repo root contains `mc_tokenizer_rs/` without a built `.pyd`, Python may
+        resolve it as a namespace package first. When a wheel is installed, a compiled
+        `mc_tokenizer_rs*.pyd` will exist somewhere on sys.path; we load it explicitly.
+        """
+
+        expected = ("analyze_text", "scan_line", "normalize_part")
+        if _NATIVE_TOKENIZER is not None and all(
+            hasattr(_NATIVE_TOKENIZER, name) for name in expected
+        ):
+            return _NATIVE_TOKENIZER
+
+        module_name = "mc_tokenizer_rs"
+        for entry in list(sys.path):
+            try:
+                base = Path(entry)
+            except Exception:
+                continue
+            if not base.exists() or not base.is_dir():
+                continue
+            try:
+                for candidate in base.rglob("mc_tokenizer_rs*.pyd"):
+                    loader = importlib.machinery.ExtensionFileLoader(
+                        module_name, str(candidate)
+                    )
+                    spec = importlib.util.spec_from_file_location(
+                        module_name, str(candidate), loader=loader
+                    )
+                    if spec is None or spec.loader is None:
+                        continue
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+                    if all(hasattr(mod, name) for name in expected):
+                        return mod
+            except Exception:
+                continue
+        return None
+
+    _NATIVE_TOKENIZER = _load_mc_tokenizer_extension()  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Format constants
@@ -461,9 +511,7 @@ def _analyze_json_line(line: str) -> Optional[_LineAnalysis]:
     )
 
 
-def _find_next_variable_legacy(
-    line: str, start: int
-) -> Optional[Tuple[int, int, str]]:
+def _find_next_variable_legacy(line: str, start: int) -> Optional[Tuple[int, int, str]]:
     """Reference implementation kept only for the golden differential test.
 
     Calls 12 separate regex searches per cursor position.  The production
@@ -507,7 +555,11 @@ def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]
 
     generic_match = _COMBINED_VAR_RE.search(line, start)
     if generic_match is not None:
-        candidate = (generic_match.start(), generic_match.end(), generic_match.lastgroup)
+        candidate = (
+            generic_match.start(),
+            generic_match.end(),
+            generic_match.lastgroup,
+        )
         if (
             best is None
             or candidate[0] < best[0]
@@ -765,9 +817,11 @@ def _iter_text_lines(file_path: Path) -> Iterator[str]:
 def _pack_archive_payload(payload: dict, level: int = _ZSTD_LEVEL_STRUCTURED) -> bytes:
     """Pack *payload* as an ``.mck`` archive."""
     raw = msgpack.packb(payload, use_bin_type=True)
-    return MAGIC + bytes([VERSION]) + zstd.ZstdCompressor(
-        level=level, threads=_zstd_threads()
-    ).compress(raw)
+    return (
+        MAGIC
+        + bytes([VERSION])
+        + zstd.ZstdCompressor(level=level, threads=_zstd_threads()).compress(raw)
+    )
 
 
 def _build_tarzstd_bytes(input_dir: Path, all_files: List[Path]) -> bytes:
@@ -1692,9 +1746,7 @@ def compress_corpus_template_with_metrics(
                 normalized_tpl_count.get(skeleton, 0) + count
             )
         for json_key, count in file_json_template_keys.items():
-            json_template_keys[json_key] = (
-                json_template_keys.get(json_key, 0) + count
-            )
+            json_template_keys[json_key] = json_template_keys.get(json_key, 0) + count
 
     t_tokenize_s = time.perf_counter() - t_tokenize_start
     t_count_s = 0.0  # tokenise and count are combined in a single pass above
