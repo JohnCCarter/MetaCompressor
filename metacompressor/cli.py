@@ -323,7 +323,9 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     print(f"  Template reuse rate : {metrics['template_reuse_rate'] * 100:.1f}%")
     reuse_before = metrics.get("template_reuse_before")
     if reuse_before is None:
-        print("  Reuse before        : (legacy metric off; pass compute_legacy_metrics=True)")
+        print(
+            "  Reuse before        : (legacy metric off; pass compute_legacy_metrics=True)"
+        )
     else:
         print(f"  Reuse before        : {reuse_before * 100:.1f}%")
     print(f"  Reuse after         : {metrics['template_reuse_after'] * 100:.1f}%")

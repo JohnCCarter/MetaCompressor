@@ -54,6 +54,7 @@ def _zstd_threads() -> int:
     except ValueError:
         return 0
 
+
 MAGIC = b"MC1\x00"
 VERSION = 0x01
 # Level 1 is intentional: by the time bytes reach this serialiser, MC has

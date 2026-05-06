@@ -23,7 +23,6 @@ from __future__ import annotations
 import metacompressor.corpus_template as ct
 from metacompressor.corpus_template import _scan_text_line
 
-
 # Representative log lines covering every variable category and several
 # documented edge cases.  Add new cases here whenever a real-world line
 # trips the tokeniser.

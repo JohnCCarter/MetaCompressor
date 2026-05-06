@@ -25,7 +25,6 @@ find_similar_chunk(chunk, chunks, recent_ids, threshold) -> (base_id, diffs) | N
 from __future__ import annotations
 
 import msgpack
-import numpy as np
 
 SIMILARITY_THRESHOLD = 0.80
 MAX_CANDIDATES = 64
@@ -39,9 +38,13 @@ def similarity(a: bytes, b: bytes) -> float:
     n = len(a)
     if n == 0 or len(b) != n:
         return 0.0
-    arr_a = np.frombuffer(a, dtype=np.uint8)
-    arr_b = np.frombuffer(b, dtype=np.uint8)
-    return float((arr_a == arr_b).mean())
+    mv_a = memoryview(a)
+    mv_b = memoryview(b)
+    matches = 0
+    for ba, bb in zip(mv_a, mv_b):
+        if ba == bb:
+            matches += 1
+    return matches / n
 
 
 def compute_delta(base: bytes, target: bytes) -> list[list[int]]:
@@ -55,17 +58,14 @@ def compute_delta(base: bytes, target: bytes) -> list[list[int]]:
     target_len = len(target)
     if target_len == 0:
         return []
-    base_view = np.frombuffer(base[:target_len], dtype=np.uint8)
-    target_view = np.frombuffer(target, dtype=np.uint8)
-    if base_view.shape[0] != target_view.shape[0]:
-        # Pure-Python fallback for the unusual short-base case.
-        return [[i, target[i]] for i in range(target_len) if i >= len(base) or target[i] != base[i]]
-    mask = base_view != target_view
-    offsets = np.flatnonzero(mask)
-    if offsets.size == 0:
-        return []
-    values = target_view[offsets]
-    return [[int(o), int(v)] for o, v in zip(offsets, values)]
+    diffs: list[list[int]] = []
+    mv_base = memoryview(base)
+    mv_target = memoryview(target)
+    for i in range(target_len):
+        tv = mv_target[i]
+        if i >= len(mv_base) or mv_base[i] != tv:
+            diffs.append([i, int(tv)])
+    return diffs
 
 
 def apply_delta(base: bytes, diffs: list, target_len: int) -> bytes:
@@ -141,8 +141,9 @@ def find_similar_chunk(
     if not candidates:
         return None
 
-    target_view = np.frombuffer(chunk, dtype=np.uint8)
-    threshold_matches = int(threshold * chunk_len) + 1  # strictly greater than threshold
+    threshold_matches = (
+        int(threshold * chunk_len) + 1
+    )  # strictly greater than threshold
 
     best_matches = threshold_matches - 1
     best_id: int | None = None
@@ -150,8 +151,12 @@ def find_similar_chunk(
 
     for cid in candidates:
         base = full_chunks[cid]
-        base_view = np.frombuffer(base, dtype=np.uint8)
-        matches = int(np.count_nonzero(base_view == target_view))
+        matches = 0
+        mv_base = memoryview(base)
+        mv_target = memoryview(chunk)
+        for ba, bb in zip(mv_base, mv_target):
+            if ba == bb:
+                matches += 1
         if matches > best_matches:
             best_matches = matches
             best_id = cid
