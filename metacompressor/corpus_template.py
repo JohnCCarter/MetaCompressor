@@ -107,39 +107,9 @@ import zstandard as zstd
 from metacompressor.container import _zstd_threads
 
 _WORKER_SHM_KEEPALIVE: List[shared_memory.SharedMemory] = []
-_DEBUG_LOG_PATH = "debug-2891a2.log"
-
-
-def _agent_debug_log(
-    run_id: str,
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: Dict[str, Any],
-) -> None:
-    # #region agent log
-    try:
-        import json
-
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as _debug_handle:
-            _debug_handle.write(
-                json.dumps(
-                    {
-                        "sessionId": "2891a2",
-                        "runId": run_id,
-                        "hypothesisId": hypothesis_id,
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=True,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
+_ADMISSIBILITY_MIN_LARGE_LINES = 50_000
+_ADMISSIBILITY_MIN_SHARED_TEMPLATES = 16
+_ADMISSIBILITY_MIN_FILES = 4
 
 
 # Optional native tokenizer (Rust extension via PyO3).  When present,
@@ -1018,6 +988,42 @@ def _build_tarzstd_bytes(input_dir: Path, all_files: List[Path]) -> bytes:
     return output.getvalue()
 
 
+class _CountingWriter:
+    """File-like sink that counts written bytes."""
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    def write(self, data: bytes) -> int:
+        n = len(data)
+        self.count += n
+        return n
+
+    def flush(self) -> None:
+        return None
+
+
+def _measure_tarzstd_size(input_dir: Path, all_files: List[Path]) -> int:
+    """Return TAR+ZSTD baseline size without materializing output bytes."""
+    sink = _CountingWriter()
+    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
+        sink, closefd=False
+    ) as compressor:
+        with tarfile.open(fileobj=compressor, mode="w|") as tar:
+            for file_path in all_files:
+                info = tarfile.TarInfo(name=file_path.relative_to(input_dir).as_posix())
+                info.size = file_path.stat().st_size
+                info.mtime = 0
+                info.uid = 0
+                info.gid = 0
+                info.uname = ""
+                info.gname = ""
+                info.mode = 0o644
+                with file_path.open("rb") as source:
+                    tar.addfile(info, source)
+    return sink.count
+
+
 def _build_raw_tarzstd_archive(tarzstd_bytes: bytes) -> bytes:
     """Wrap pre-compressed TAR+ZSTD bytes in an ``.mck`` archive."""
     return _pack_archive_payload(
@@ -1805,18 +1811,6 @@ def compress_corpus_template_with_metrics(
         If *input_dir* is not a directory.
     """
     t_total_start = time.perf_counter()
-    # #region agent log
-    _agent_debug_log(
-        run_id="pre-fix",
-        hypothesis_id="H1",
-        location="metacompressor/corpus_template.py:compress_corpus_template_with_metrics:start",
-        message="compress_entry",
-        data={
-            "structure_v2_enabled": bool(structure_v2_enabled),
-            "compute_legacy_metrics": bool(compute_legacy_metrics),
-        },
-    )
-    # #endregion
 
     input_dir = Path(input_dir)
     if not input_dir.is_dir():
@@ -1876,21 +1870,6 @@ def compress_corpus_template_with_metrics(
     ]
     total_corpus_bytes = sum(p.stat().st_size for p in all_files)
     n_workers = _decide_tokenize_workers(len(all_files), total_corpus_bytes)
-    # #region agent log
-    _agent_debug_log(
-        run_id="pre-fix",
-        hypothesis_id="H2",
-        location="metacompressor/corpus_template.py:compress_corpus_template_with_metrics:workers",
-        message="worker_decision",
-        data={
-            "num_files": len(all_files),
-            "total_corpus_bytes": int(total_corpus_bytes),
-            "n_workers": int(n_workers),
-            "platform": os.name,
-            "mc_tokenize_workers": os.environ.get("MC_TOKENIZE_WORKERS", ""),
-        },
-    )
-    # #endregion
     use_shared_pass1 = False
     shared_payload_bytes = 0
     shared_results_count = 0
@@ -2001,14 +1980,37 @@ def compress_corpus_template_with_metrics(
         if len(template_group) > 1
     )
 
-    row_result, row_stats = _build_row_template_archive(
-        input_dir=input_dir,
-        all_files=all_files,
-        file_meta=file_meta,
-        tok_cache=tok_cache,
-        tpl_to_id=tpl_to_id,
-        tpl_strings=tpl_strings,
+    admissibility_pruned_row = (
+        total_lines >= _ADMISSIBILITY_MIN_LARGE_LINES
+        and len(tpl_strings) >= _ADMISSIBILITY_MIN_SHARED_TEMPLATES
+        and len(all_files) >= _ADMISSIBILITY_MIN_FILES
     )
+    if os.environ.get("MC_DISABLE_ADMISSIBILITY_PRUNING", "").strip() in (
+        "1",
+        "true",
+        "True",
+    ):
+        admissibility_pruned_row = False
+    row_result: Optional[bytes] = None
+    row_stats = {
+        "encode_s": 0.0,
+        "serialize_s": 0.0,
+        "fallback_reason_counts": {},
+        "template_reuse_count": 0,
+        "raw_fallback_lines": 0,
+        "binary_fallback_files": 0,
+        "low_structure_fallback_files": 0,
+        "total_var_slots": 0,
+    }
+    if not admissibility_pruned_row:
+        row_result, row_stats = _build_row_template_archive(
+            input_dir=input_dir,
+            all_files=all_files,
+            file_meta=file_meta,
+            tok_cache=tok_cache,
+            tpl_to_id=tpl_to_id,
+            tpl_strings=tpl_strings,
+        )
     columnar_result, columnar_stats = _build_columnar_template_archive(
         all_files=all_files,
         file_meta=file_meta,
@@ -2030,12 +2032,14 @@ def compress_corpus_template_with_metrics(
     # re-encode as raw_tar_zstd mode so the caller never receives an archive
     # worse than TAR+ZSTD by more than a few dozen bytes of MCK overhead.
     # -----------------------------------------------------------------------
-    tarzstd_bytes = _build_tarzstd_bytes(input_dir, all_files)
-    tarzstd_size = len(tarzstd_bytes)
+    tarzstd_size = _measure_tarzstd_size(input_dir, all_files)
 
-    row_mode_size = len(row_result)
+    row_mode_size = len(row_result) if row_result is not None else len(columnar_result)
     columnar_size = len(columnar_result)
-    if columnar_size < row_mode_size:
+    if row_result is None:
+        best_template_result = columnar_result
+        best_template_mode = _MODE_COLUMNAR_V2
+    elif columnar_size < row_mode_size:
         best_template_result = columnar_result
         best_template_mode = _MODE_COLUMNAR_V2
     else:
@@ -2043,6 +2047,7 @@ def compress_corpus_template_with_metrics(
         best_template_mode = _MODE_ROW_V1
 
     if len(best_template_result) > tarzstd_size * _CORPUS_FALLBACK_THRESHOLD:
+        tarzstd_bytes = _build_tarzstd_bytes(input_dir, all_files)
         result = _build_raw_tarzstd_archive(tarzstd_bytes)
         final_selected_mode = _MODE_RAW_TAR_ZSTD
         chose_raw_fallback = True
@@ -2058,22 +2063,6 @@ def compress_corpus_template_with_metrics(
             fallback_reason_counts = dict(columnar_stats["fallback_reason_counts"])
         else:
             fallback_reason_counts = dict(row_stats["fallback_reason_counts"])
-    # #region agent log
-    _agent_debug_log(
-        run_id="pre-fix",
-        hypothesis_id="H3",
-        location="metacompressor/corpus_template.py:compress_corpus_template_with_metrics:mode_select",
-        message="mode_selection",
-        data={
-            "row_mode_size": int(row_mode_size),
-            "columnar_size": int(columnar_size),
-            "tarzstd_size": int(tarzstd_size),
-            "selected_mode": final_selected_mode,
-            "chose_raw_fallback": bool(chose_raw_fallback),
-        },
-    )
-    # #endregion
-
     t_total_s = time.perf_counter() - t_total_start
 
     template_reuse_count = row_stats["template_reuse_count"]
@@ -2120,6 +2109,16 @@ def compress_corpus_template_with_metrics(
         "row_mode_size": row_mode_size,
         "columnar_savings_vs_row": row_mode_size - columnar_size,
         "final_selected_mode": final_selected_mode,
+        "admissibility": {
+            "row_pruned": bool(admissibility_pruned_row),
+            "row_prune_reasons": (
+                ["large_structured_corpus"] if admissibility_pruned_row else []
+            ),
+            "disabled_via_env": bool(
+                os.environ.get("MC_DISABLE_ADMISSIBILITY_PRUNING", "").strip()
+                in ("1", "true", "True")
+            ),
+        },
         "timing": {
             "tokenize_s": t_tokenize_s,
             "count_s": t_count_s,
@@ -2156,21 +2155,6 @@ def compress_corpus_template_with_metrics(
             "open_failures": shared_open_failures,
         },
     }
-    # #region agent log
-    _agent_debug_log(
-        run_id="pre-fix",
-        hypothesis_id="H4",
-        location="metacompressor/corpus_template.py:compress_corpus_template_with_metrics:metrics",
-        message="final_metrics_snapshot",
-        data={
-            "num_shared_templates": int(metrics["num_shared_templates"]),
-            "template_reuse_rate": float(metrics["template_reuse_rate"]),
-            "json_lines_detected": int(metrics["json_lines_detected"]),
-            "shared_open_failures": int(metrics["timing"]["shared_open_failures"]),
-            "shared_pass1_enabled": bool(metrics["shared_pass1"]["enabled"]),
-        },
-    )
-    # #endregion
     return result, metrics
 
 
