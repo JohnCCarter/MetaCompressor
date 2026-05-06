@@ -35,6 +35,8 @@ jobs:
             echo "No lockfile changes."
             exit 0
           fi
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
           git add mc_tokenizer_rs/Cargo.lock
           git commit -m "chore(mc_tokenizer_rs): update Cargo.lock for pyo3 patch"
           git push origin HEAD
