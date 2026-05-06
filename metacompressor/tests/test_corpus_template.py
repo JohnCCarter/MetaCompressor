@@ -266,7 +266,11 @@ class TestMetrics:
             "serialize_s",
             "zstd_s",
             "total_s",
+            "shared_unpack_s",
+            "shared_open_failures",
         }
+        assert "timing_breakdown" in metrics
+        assert "shared_pass1" in metrics
 
     def test_timing_non_negative(self, tmp_path):
         from metacompressor.corpus_template import compress_corpus_template_with_metrics

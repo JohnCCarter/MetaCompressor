@@ -97,6 +97,7 @@ import time
 from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from multiprocessing import resource_tracker, shared_memory
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -104,6 +105,42 @@ import msgpack
 import zstandard as zstd
 
 from metacompressor.container import _zstd_threads
+
+_WORKER_SHM_KEEPALIVE: List[shared_memory.SharedMemory] = []
+_DEBUG_LOG_PATH = "debug-2891a2.log"
+
+
+def _agent_debug_log(
+    run_id: str,
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: Dict[str, Any],
+) -> None:
+    # #region agent log
+    try:
+        import json
+
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as _debug_handle:
+            _debug_handle.write(
+                json.dumps(
+                    {
+                        "sessionId": "2891a2",
+                        "runId": run_id,
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=True,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+
 
 # Optional native tokenizer (Rust extension via PyO3).  When present,
 # _scan_text_line dispatches to a C-fast implementation that scans for
@@ -744,6 +781,134 @@ def _tokenize_one_file(
 def _tokenize_one_file_unpack(args) -> tuple:
     """ProcessPoolExecutor.map shim — unpacks the args tuple."""
     return _tokenize_one_file(*args)
+
+
+def _pack_line_analysis(analysis: _LineAnalysis) -> list:
+    return [
+        list(analysis.template_parts),
+        list(analysis.values),
+        list(analysis.normalized_skeleton),
+        list(analysis.value_kinds),
+        bool(analysis.is_json),
+        list(analysis.json_structure_key),
+    ]
+
+
+def _unpack_line_analysis(data: list) -> _LineAnalysis:
+    return _LineAnalysis(
+        template_parts=tuple(data[0]),
+        values=list(data[1]),
+        normalized_skeleton=tuple(data[2]),
+        value_kinds=tuple(data[3]),
+        is_json=bool(data[4]),
+        json_structure_key=tuple(data[5]),
+    )
+
+
+def _tokenize_result_to_payload(result: tuple) -> bytes:
+    (
+        rel,
+        is_binary,
+        cached_lines,
+        local_tok_cache,
+        local_legacy_tok_cache,
+        file_tpl_count,
+        file_legacy_tpl_count,
+        file_normalized_tpl_count,
+        file_json_template_keys,
+        file_total_lines,
+        file_json_lines,
+    ) = result
+    payload = {
+        "rel": rel,
+        "is_binary": bool(is_binary),
+        "cached_lines": list(cached_lines or []),
+        "tok_cache": [
+            [line, _pack_line_analysis(analysis)]
+            for line, analysis in local_tok_cache.items()
+        ],
+        "legacy_tok_cache": (
+            None
+            if local_legacy_tok_cache is None
+            else [
+                [line, [list(tpl), list(vals)]]
+                for line, (tpl, vals) in local_legacy_tok_cache.items()
+            ]
+        ),
+        "tpl_count": [[list(k), int(v)] for k, v in file_tpl_count.items()],
+        "legacy_tpl_count": [
+            [list(k), int(v)] for k, v in file_legacy_tpl_count.items()
+        ],
+        "normalized_tpl_count": [
+            [list(k), int(v)] for k, v in file_normalized_tpl_count.items()
+        ],
+        "json_template_keys": [
+            [list(k), int(v)] for k, v in file_json_template_keys.items()
+        ],
+        "file_total_lines": int(file_total_lines),
+        "file_json_lines": int(file_json_lines),
+    }
+    return msgpack.packb(payload, use_bin_type=True)
+
+
+def _tokenize_payload_to_result(payload: bytes) -> tuple:
+    data = msgpack.unpackb(payload, raw=False, strict_map_key=False)
+    local_tok_cache = {
+        line: _unpack_line_analysis(analysis_data)
+        for line, analysis_data in data["tok_cache"]
+    }
+    local_legacy_tok_cache = None
+    if data["legacy_tok_cache"] is not None:
+        local_legacy_tok_cache = {
+            line: (tuple(entry[0]), list(entry[1]))
+            for line, entry in data["legacy_tok_cache"]
+        }
+    return (
+        data["rel"],
+        bool(data["is_binary"]),
+        list(data["cached_lines"]),
+        local_tok_cache,
+        local_legacy_tok_cache,
+        {tuple(k): int(v) for k, v in data["tpl_count"]},
+        {tuple(k): int(v) for k, v in data["legacy_tpl_count"]},
+        {tuple(k): int(v) for k, v in data["normalized_tpl_count"]},
+        {tuple(k): int(v) for k, v in data["json_template_keys"]},
+        int(data["file_total_lines"]),
+        int(data["file_json_lines"]),
+    )
+
+
+def _tokenize_one_file_shared_unpack(args) -> tuple:
+    """ProcessPoolExecutor shim that returns shared-memory metadata.
+
+    Worker computes the normal tuple result, serializes it, stores the bytes in
+    shared memory, and returns only ``("__shm__", name, size)`` to avoid large
+    pickle payloads over process boundaries.
+    """
+    result = _tokenize_one_file(*args)
+    try:
+        payload = _tokenize_result_to_payload(result)
+        shm = shared_memory.SharedMemory(create=True, size=len(payload))
+        try:
+            shm.buf[: len(payload)] = payload
+            if os.name == "nt":
+                _WORKER_SHM_KEEPALIVE.append(shm)
+            # Prevent child-process resource tracker from eagerly unlinking the
+            # segment before the parent has consumed it (Windows-safe handoff).
+            try:
+                resource_tracker.unregister(shm._name, "shared_memory")
+            except Exception:
+                # Best-effort only; fallback path below preserves correctness.
+                pass
+            return ("__shm__", shm.name, len(payload))
+        finally:
+            # On Windows, closing the creator handle may destroy the segment
+            # before the parent opens it; let worker process teardown reclaim it.
+            if os.name != "nt":
+                shm.close()
+    except Exception:
+        # Safe fallback: if shared memory/serialization fails, preserve legacy path.
+        return result
 
 
 def _decide_tokenize_workers(num_files: int, total_bytes: int) -> int:
@@ -1640,6 +1805,18 @@ def compress_corpus_template_with_metrics(
         If *input_dir* is not a directory.
     """
     t_total_start = time.perf_counter()
+    # #region agent log
+    _agent_debug_log(
+        run_id="pre-fix",
+        hypothesis_id="H1",
+        location="metacompressor/corpus_template.py:compress_corpus_template_with_metrics:start",
+        message="compress_entry",
+        data={
+            "structure_v2_enabled": bool(structure_v2_enabled),
+            "compute_legacy_metrics": bool(compute_legacy_metrics),
+        },
+    )
+    # #endregion
 
     input_dir = Path(input_dir)
     if not input_dir.is_dir():
@@ -1699,6 +1876,26 @@ def compress_corpus_template_with_metrics(
     ]
     total_corpus_bytes = sum(p.stat().st_size for p in all_files)
     n_workers = _decide_tokenize_workers(len(all_files), total_corpus_bytes)
+    # #region agent log
+    _agent_debug_log(
+        run_id="pre-fix",
+        hypothesis_id="H2",
+        location="metacompressor/corpus_template.py:compress_corpus_template_with_metrics:workers",
+        message="worker_decision",
+        data={
+            "num_files": len(all_files),
+            "total_corpus_bytes": int(total_corpus_bytes),
+            "n_workers": int(n_workers),
+            "platform": os.name,
+            "mc_tokenize_workers": os.environ.get("MC_TOKENIZE_WORKERS", ""),
+        },
+    )
+    # #endregion
+    use_shared_pass1 = False
+    shared_payload_bytes = 0
+    shared_results_count = 0
+    t_shared_unpack_s = 0.0
+    shared_open_failures = 0
 
     if n_workers > 1:
         # Parallel pass 1.  Each worker tokenises its files independently
@@ -1706,14 +1903,37 @@ def compress_corpus_template_with_metrics(
         # and merges below so cross-worker line repetition is dedup'd at
         # archive build time.
         chunksize = max(1, len(work_items) // (n_workers * 4))
+        use_shared_pass1 = os.name != "nt" and os.environ.get(
+            "MC_DISABLE_SHARED_PASS1", ""
+        ).strip() not in ("1", "true", "True")
+        mapper = (
+            _tokenize_one_file_shared_unpack
+            if use_shared_pass1
+            else _tokenize_one_file_unpack
+        )
         with ProcessPoolExecutor(max_workers=n_workers) as ex:
-            results = list(
-                ex.map(_tokenize_one_file_unpack, work_items, chunksize=chunksize)
-            )
+            results = list(ex.map(mapper, work_items, chunksize=chunksize))
     else:
         results = [_tokenize_one_file(*item) for item in work_items]
 
-    for result in results:
+    for idx, result in enumerate(results):
+        if isinstance(result, tuple) and len(result) == 3 and result[0] == "__shm__":
+            _, shm_name, payload_size = result
+            shared_results_count += 1
+            shared_payload_bytes += int(payload_size)
+            t_unpack_start = time.perf_counter()
+            try:
+                shm = shared_memory.SharedMemory(name=shm_name)
+                try:
+                    payload = bytes(shm.buf[:payload_size])
+                finally:
+                    shm.close()
+                    shm.unlink()
+                result = _tokenize_payload_to_result(payload)
+            except FileNotFoundError:
+                shared_open_failures += 1
+                result = _tokenize_one_file(*work_items[idx])
+            t_shared_unpack_s += time.perf_counter() - t_unpack_start
         (
             rel,
             is_binary,
@@ -1838,6 +2058,21 @@ def compress_corpus_template_with_metrics(
             fallback_reason_counts = dict(columnar_stats["fallback_reason_counts"])
         else:
             fallback_reason_counts = dict(row_stats["fallback_reason_counts"])
+    # #region agent log
+    _agent_debug_log(
+        run_id="pre-fix",
+        hypothesis_id="H3",
+        location="metacompressor/corpus_template.py:compress_corpus_template_with_metrics:mode_select",
+        message="mode_selection",
+        data={
+            "row_mode_size": int(row_mode_size),
+            "columnar_size": int(columnar_size),
+            "tarzstd_size": int(tarzstd_size),
+            "selected_mode": final_selected_mode,
+            "chose_raw_fallback": bool(chose_raw_fallback),
+        },
+    )
+    # #endregion
 
     t_total_s = time.perf_counter() - t_total_start
 
@@ -1893,8 +2128,49 @@ def compress_corpus_template_with_metrics(
             "serialize_s": t_serialize_s,
             "zstd_s": t_zstd_s,
             "total_s": t_total_s,
+            "shared_unpack_s": t_shared_unpack_s,
+            "shared_open_failures": shared_open_failures,
+        },
+        "timing_breakdown": {
+            "corpus_scan_time_s": t_tokenize_s + t_count_s,
+            "sampling_time_s": 0.0,
+            "feature_extraction_time_s": t_tokenize_s,
+            "structure_extraction_time_s": t_tokenize_s,
+            "candidate_build_time_per_mode_s": {
+                "row_template": row_stats["encode_s"],
+                "columnar_encoding_v2": columnar_stats["encode_s"],
+            },
+            "msgpack_metadata_packing_time_s": t_serialize_s,
+            "zstd_time_s": t_zstd_s,
+            "decompression_time_s": None,
+            "shared_unpack_s": t_shared_unpack_s,
+            "shared_results_count": shared_results_count,
+            "shared_payload_bytes": shared_payload_bytes,
+            "shared_open_failures": shared_open_failures,
+        },
+        "shared_pass1": {
+            "enabled": bool(use_shared_pass1 and n_workers > 1),
+            "workers": n_workers,
+            "results_count": shared_results_count,
+            "payload_bytes": shared_payload_bytes,
+            "open_failures": shared_open_failures,
         },
     }
+    # #region agent log
+    _agent_debug_log(
+        run_id="pre-fix",
+        hypothesis_id="H4",
+        location="metacompressor/corpus_template.py:compress_corpus_template_with_metrics:metrics",
+        message="final_metrics_snapshot",
+        data={
+            "num_shared_templates": int(metrics["num_shared_templates"]),
+            "template_reuse_rate": float(metrics["template_reuse_rate"]),
+            "json_lines_detected": int(metrics["json_lines_detected"]),
+            "shared_open_failures": int(metrics["timing"]["shared_open_failures"]),
+            "shared_pass1_enabled": bool(metrics["shared_pass1"]["enabled"]),
+        },
+    )
+    # #endregion
     return result, metrics
 
 

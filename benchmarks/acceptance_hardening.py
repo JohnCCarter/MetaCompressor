@@ -52,6 +52,81 @@ _generate_noisy_logs = pv._generate_noisy_logs
 _json_dumps = pv._json_dumps
 _measure_dataset = pv._measure_dataset
 _mode_label = pv._mode_label
+_DEBUG_LOG_PATH = REPO_ROOT / "debug-7c93f6.log"
+_DEBUG_SESSION_ID = "7c93f6"
+_DEBUG_RUN_ID = os.getenv("MC_DEBUG_RUN_ID", "pre-fix")
+
+
+def _debug_log(
+    run_id: str,
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: Dict[str, Any],
+) -> None:
+    payload = {
+        "sessionId": _DEBUG_SESSION_ID,
+        "runId": run_id,
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
+
+
+def _gen_structured_scale_10mb(root: Path) -> None:
+    _generate_app_service_logs(root, 10, seed=1001, files=8)
+
+
+def _gen_structured_scale_50mb(root: Path) -> None:
+    _generate_app_service_logs(root, 50, seed=1002, files=12)
+
+
+def _gen_structured_scale_100mb(root: Path) -> None:
+    _generate_app_service_logs(root, 100, seed=1003, files=16)
+
+
+def _gen_app_service_logs(root: Path) -> None:
+    _generate_app_service_logs(root, 12, seed=101, files=10)
+
+
+def _gen_json_ndjson_logs(root: Path) -> None:
+    _generate_ndjson_logs(root, 14, seed=202, files=8)
+
+
+def _gen_nginx_access_logs(root: Path) -> None:
+    _generate_nginx_logs(root, 14, seed=303, files=6)
+
+
+def _gen_mixed_microservice_logs(root: Path) -> None:
+    _generate_mixed_microservice_logs(root, 18, seed=404)
+
+
+def _gen_high_cardinality_logs(root: Path) -> None:
+    _generate_high_cardinality_logs(root, 10, seed=505, files=6)
+
+
+def _gen_noisy_low_structure_logs(root: Path) -> None:
+    _generate_noisy_logs(root, 9, seed=606, files=6)
+
+
+def _gen_many_small_files_5000(root: Path) -> None:
+    _generate_many_small_files(root, seed=909, files=5000)
+
+
+def _gen_structured_scale_250mb(root: Path) -> None:
+    _generate_app_service_logs(root, 250, seed=1004, files=24)
+
+
+def _gen_structured_scale_500mb(root: Path) -> None:
+    _generate_app_service_logs(root, 500, seed=1005, files=32)
+
 
 _EDGE_DATASET_NAMES = (
     "app_service_logs",
@@ -83,84 +158,70 @@ def _dataset_specs(include_500mb: bool) -> List[DatasetSpec]:
             dataset_type="structured scale 10MB",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(
-                root, 10, seed=1001, files=8
-            ),
+            generator=_gen_structured_scale_10mb,
         ),
         DatasetSpec(
             name="structured_scale_50mb",
             dataset_type="structured scale 50MB",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(
-                root, 50, seed=1002, files=12
-            ),
+            generator=_gen_structured_scale_50mb,
         ),
         DatasetSpec(
             name="structured_scale_100mb",
             dataset_type="structured scale 100MB",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(
-                root, 100, seed=1003, files=16
-            ),
+            generator=_gen_structured_scale_100mb,
         ),
         DatasetSpec(
             name="app_service_logs",
             dataset_type="app/service logs",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(
-                root, 12, seed=101, files=10
-            ),
+            generator=_gen_app_service_logs,
         ),
         DatasetSpec(
             name="json_ndjson_logs",
             dataset_type="JSON/NDJSON",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_ndjson_logs(root, 14, seed=202, files=8),
+            generator=_gen_json_ndjson_logs,
         ),
         DatasetSpec(
             name="nginx_access_logs",
             dataset_type="nginx/access",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_nginx_logs(root, 14, seed=303, files=6),
+            generator=_gen_nginx_access_logs,
         ),
         DatasetSpec(
             name="mixed_microservice_logs",
             dataset_type="mixed microservice logs",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_mixed_microservice_logs(
-                root, 18, seed=404
-            ),
+            generator=_gen_mixed_microservice_logs,
         ),
         DatasetSpec(
             name="high_cardinality_logs",
             dataset_type="high-cardinality logs",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_high_cardinality_logs(
-                root, 10, seed=505, files=6
-            ),
+            generator=_gen_high_cardinality_logs,
         ),
         DatasetSpec(
             name="noisy_low_structure_logs",
             dataset_type="noisy/low-structure logs",
             realism="semi-realistic",
             structured=False,
-            generator=lambda root: _generate_noisy_logs(root, 9, seed=606, files=6),
+            generator=_gen_noisy_low_structure_logs,
         ),
         DatasetSpec(
             name="many_small_files_5000",
             dataset_type="many-small-files corpus",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_many_small_files(
-                root, seed=909, files=5000
-            ),
+            generator=_gen_many_small_files_5000,
         ),
     ]
     specs.append(
@@ -169,9 +230,7 @@ def _dataset_specs(include_500mb: bool) -> List[DatasetSpec]:
             dataset_type="structured scale 250MB",
             realism="semi-realistic",
             structured=True,
-            generator=lambda root: _generate_app_service_logs(
-                root, 250, seed=1004, files=24
-            ),
+            generator=_gen_structured_scale_250mb,
         )
     )
     if include_500mb:
@@ -181,11 +240,28 @@ def _dataset_specs(include_500mb: bool) -> List[DatasetSpec]:
                 dataset_type="structured scale 500MB",
                 realism="semi-realistic",
                 structured=True,
-                generator=lambda root: _generate_app_service_logs(
-                    root, 500, seed=1005, files=32
-                ),
+                generator=_gen_structured_scale_500mb,
             )
         )
+    # region agent log
+    _debug_log(
+        run_id=_DEBUG_RUN_ID,
+        hypothesis_id="H1",
+        location="acceptance_hardening.py:_dataset_specs",
+        message="Built dataset specs with generator metadata",
+        data={
+            "include_500mb": bool(include_500mb),
+            "spec_count": len(specs),
+            "generator_qualnames": [
+                getattr(spec.generator, "__qualname__", str(type(spec.generator)))
+                for spec in specs
+            ],
+            "generator_modules": [
+                getattr(spec.generator, "__module__", "<unknown>") for spec in specs
+            ],
+        },
+    )
+    # endregion
     return specs
 
 
@@ -242,6 +318,19 @@ def _measure_dataset_worker(
 ) -> None:
     dataset_dir = Path(dataset_dir_str)
     work_dir = Path(work_dir_str)
+    # region agent log
+    _debug_log(
+        run_id=_DEBUG_RUN_ID,
+        hypothesis_id="H3",
+        location="acceptance_hardening.py:_measure_dataset_worker",
+        message="Worker process entry",
+        data={
+            "dataset": spec.name,
+            "generator_qualname": getattr(spec.generator, "__qualname__", "<missing>"),
+            "generator_module": getattr(spec.generator, "__module__", "<missing>"),
+        },
+    )
+    # endregion
     try:
         _build_dataset(dataset_dir, spec)
         queue.put(
@@ -273,8 +362,54 @@ def _run_dataset_with_timeout(
         target=_measure_dataset_worker,
         args=(spec, str(dataset_dir), str(work_dir), queue),
     )
-    process.start()
+    # region agent log
+    _debug_log(
+        run_id=_DEBUG_RUN_ID,
+        hypothesis_id="H2",
+        location="acceptance_hardening.py:_run_dataset_with_timeout",
+        message="About to start process",
+        data={
+            "dataset": spec.name,
+            "os_name": os.name,
+            "ctx_type": str(type(ctx)),
+            "generator_qualname": getattr(spec.generator, "__qualname__", "<missing>"),
+            "generator_module": getattr(spec.generator, "__module__", "<missing>"),
+            "timeout_s": int(timeout_s),
+        },
+    )
+    # endregion
+    try:
+        process.start()
+    except Exception as exc:
+        # region agent log
+        _debug_log(
+            run_id=_DEBUG_RUN_ID,
+            hypothesis_id="H2",
+            location="acceptance_hardening.py:_run_dataset_with_timeout",
+            message="Process start failed",
+            data={
+                "dataset": spec.name,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        # endregion
+        raise
     process.join(timeout_s if timeout_s > 0 else None)
+    # region agent log
+    _debug_log(
+        run_id=_DEBUG_RUN_ID,
+        hypothesis_id="H4",
+        location="acceptance_hardening.py:_run_dataset_with_timeout",
+        message="Process join finished",
+        data={
+            "dataset": spec.name,
+            "exitcode": process.exitcode,
+            "is_alive": bool(process.is_alive()),
+            "queue_empty": bool(queue.empty()),
+        },
+    )
+    # endregion
 
     if process.is_alive():
         process.terminate()
