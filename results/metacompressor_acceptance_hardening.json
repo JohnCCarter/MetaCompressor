@@ -1,0 +1,7 @@
+{
+  "correctness_passed": false,
+  "determinism_passed": false,
+  "error": "Can't get local object '_dataset_specs.<locals>.<lambda>'",
+  "final_verdict": "ACCEPTANCE_HARDENING_BLOCKED Reason: benchmark failed: Can't get local object '_dataset_specs.<locals>.<lambda>'",
+  "generated_at": "2026-05-06T08:39:56Z"
+}
