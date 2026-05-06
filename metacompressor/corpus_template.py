@@ -87,6 +87,7 @@ decompress_corpus_template(data, output_dir)            -> list[str]
 from __future__ import annotations
 
 import io
+import os
 import re
 import tarfile
 import time
@@ -97,6 +98,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import msgpack
 import zstandard as zstd
+from concurrent.futures import ProcessPoolExecutor
 
 from metacompressor.container import _zstd_threads
 
@@ -542,6 +544,145 @@ def _tokenize(line: str) -> Tuple[Tuple[str, ...], List[str]]:
     """Return the structure-v2 template parts and values for *line*."""
     analysis = _analyze_line(line)
     return analysis.template_parts, list(analysis.values)
+
+
+# ---------------------------------------------------------------------------
+# Per-file tokenisation worker (used by both serial and parallel pass 1)
+# ---------------------------------------------------------------------------
+#
+# Module-level so it is picklable for ProcessPoolExecutor.  Returns a tuple
+# (rather than a dataclass) to keep IPC overhead minimal — workers pickle
+# their result on the way back to the master, and the dict-of-counts +
+# tok_cache fragments dominate the payload size.
+#
+# Layout of the returned tuple:
+#   ( rel,
+#     is_binary,
+#     cached_lines | None,
+#     local_tok_cache,                    # str -> _LineAnalysis
+#     local_legacy_tok_cache | None,      # str -> (template, values)
+#     file_tpl_count,                     # template_parts -> count
+#     file_legacy_tpl_count,              # legacy template -> count
+#     file_normalized_tpl_count,          # normalized skeleton -> count
+#     file_json_template_keys,            # json structure key -> count
+#     file_total_lines,
+#     file_json_lines )
+
+
+def _tokenize_one_file(
+    file_path: Path,
+    rel: str,
+    structure_v2_enabled: bool,
+    compute_legacy_metrics: bool,
+) -> tuple:
+    """Tokenise a single file and return the per-file state for merging."""
+    legacy_needed = compute_legacy_metrics or not structure_v2_enabled
+
+    file_legacy_tpl_count: Dict[Tuple[str, ...], int] = {}
+    file_tpl_count: Dict[Tuple[str, ...], int] = {}
+    file_normalized_tpl_count: Dict[Tuple[str, ...], int] = {}
+    file_json_template_keys: Dict[Tuple[str, ...], int] = {}
+    file_total_lines = 0
+    file_json_lines = 0
+    cached_lines: List[str] = []
+
+    line_intern: Dict[str, str] = {}
+    local_tok_cache: Dict[str, _LineAnalysis] = {}
+    local_legacy_tok_cache: Dict[str, Tuple[Tuple[str, ...], List[str]]] = {}
+
+    try:
+        for raw_line in _iter_text_lines(file_path):
+            line = line_intern.setdefault(raw_line, raw_line)
+            cached_lines.append(line)
+            file_total_lines += 1
+            if legacy_needed:
+                if line not in local_legacy_tok_cache:
+                    local_legacy_tok_cache[line] = _tokenize_legacy(line)
+                legacy_tkey = local_legacy_tok_cache[line][0]
+                file_legacy_tpl_count[legacy_tkey] = (
+                    file_legacy_tpl_count.get(legacy_tkey, 0) + 1
+                )
+
+            if line not in local_tok_cache:
+                local_tok_cache[line] = (
+                    _analyze_line(line)
+                    if structure_v2_enabled
+                    else _LineAnalysis(
+                        template_parts=local_legacy_tok_cache[line][0],
+                        values=list(local_legacy_tok_cache[line][1]),
+                        normalized_skeleton=_normalized_skeleton(
+                            local_legacy_tok_cache[line][0],
+                            tuple("legacy" for _ in local_legacy_tok_cache[line][1]),
+                            (),
+                        ),
+                        value_kinds=tuple(
+                            "legacy" for _ in local_legacy_tok_cache[line][1]
+                        ),
+                        is_json=False,
+                        json_structure_key=(),
+                    )
+                )
+            analysis = local_tok_cache[line]
+            tkey = analysis.template_parts
+            file_tpl_count[tkey] = file_tpl_count.get(tkey, 0) + 1
+            file_normalized_tpl_count[analysis.normalized_skeleton] = (
+                file_normalized_tpl_count.get(analysis.normalized_skeleton, 0) + 1
+            )
+            if analysis.is_json:
+                file_json_lines += 1
+                file_json_template_keys[analysis.json_structure_key] = (
+                    file_json_template_keys.get(analysis.json_structure_key, 0) + 1
+                )
+        return (
+            rel,
+            False,
+            cached_lines,
+            local_tok_cache,
+            local_legacy_tok_cache if legacy_needed else None,
+            file_tpl_count,
+            file_legacy_tpl_count,
+            file_normalized_tpl_count,
+            file_json_template_keys,
+            file_total_lines,
+            file_json_lines,
+        )
+    except UnicodeDecodeError:
+        return (rel, True, None, {}, None, {}, {}, {}, {}, 0, 0)
+
+
+def _tokenize_one_file_unpack(args) -> tuple:
+    """ProcessPoolExecutor.map shim — unpacks the args tuple."""
+    return _tokenize_one_file(*args)
+
+
+def _decide_tokenize_workers(num_files: int, total_bytes: int) -> int:
+    """Decide how many worker processes to use for pass 1.
+
+    Override via ``MC_TOKENIZE_WORKERS``: ``"1"`` forces serial, ``">1"``
+    forces that many workers (capped at CPU count), missing/0 → auto.
+
+    Auto-rules: serial when fewer than 4 files OR less than 2 MiB total
+    (process startup overhead dominates).  Otherwise scale to the smaller
+    of CPU count, file count, and a hard cap of 8.
+    """
+    env_str = os.environ.get("MC_TOKENIZE_WORKERS", "").strip()
+    if env_str:
+        try:
+            n = int(env_str)
+        except ValueError:
+            n = 0
+        if n == 1:
+            return 1
+        if n > 1:
+            return min(n, os.cpu_count() or 1)
+        # n <= 0 → fall through to auto
+
+    if num_files < 4:
+        return 1
+    if total_bytes < 2 * 1024 * 1024:
+        return 1
+    cpus = os.cpu_count() or 1
+    return min(cpus, num_files, 8)
 
 
 def _template_string(text_parts: Tuple[str, ...]) -> str:
@@ -1454,75 +1595,76 @@ def compress_corpus_template_with_metrics(
     json_template_keys: Dict[Tuple[str, ...], int] = {}
 
     t_tokenize_start = time.perf_counter()
-    for file_path in all_files:
-        rel = file_path.relative_to(input_dir).as_posix()
-        file_legacy_tpl_count: Dict[Tuple[str, ...], int] = {}
-        file_tpl_count: Dict[Tuple[str, ...], int] = {}
-        file_normalized_tpl_count: Dict[Tuple[str, ...], int] = {}
-        file_json_template_keys: Dict[Tuple[str, ...], int] = {}
-        file_total_lines = 0
-        file_json_lines = 0
-        cached_lines: List[str] = []
-        try:
-            for raw_line in _iter_text_lines(file_path):
-                line = line_intern.setdefault(raw_line, raw_line)
-                cached_lines.append(line)
-                file_total_lines += 1
-                if legacy_needed:
-                    if line not in legacy_tok_cache:
-                        legacy_tok_cache[line] = _tokenize_legacy(line)
-                    legacy_tkey = legacy_tok_cache[line][0]
-                    file_legacy_tpl_count[legacy_tkey] = (
-                        file_legacy_tpl_count.get(legacy_tkey, 0) + 1
-                    )
+    work_items = [
+        (
+            file_path,
+            file_path.relative_to(input_dir).as_posix(),
+            structure_v2_enabled,
+            compute_legacy_metrics,
+        )
+        for file_path in all_files
+    ]
+    total_corpus_bytes = sum(p.stat().st_size for p in all_files)
+    n_workers = _decide_tokenize_workers(len(all_files), total_corpus_bytes)
 
-                if line not in tok_cache:
-                    tok_cache[line] = (
-                        _analyze_line(line)
-                        if structure_v2_enabled
-                        else _LineAnalysis(
-                            template_parts=legacy_tok_cache[line][0],
-                            values=list(legacy_tok_cache[line][1]),
-                            normalized_skeleton=_normalized_skeleton(
-                                legacy_tok_cache[line][0],
-                                tuple("legacy" for _ in legacy_tok_cache[line][1]),
-                                (),
-                            ),
-                            value_kinds=tuple(
-                                "legacy" for _ in legacy_tok_cache[line][1]
-                            ),
-                            is_json=False,
-                            json_structure_key=(),
-                        )
-                    )
-                analysis = tok_cache[line]
-                tkey = analysis.template_parts
-                file_tpl_count[tkey] = file_tpl_count.get(tkey, 0) + 1
-                file_normalized_tpl_count[analysis.normalized_skeleton] = (
-                    file_normalized_tpl_count.get(analysis.normalized_skeleton, 0) + 1
-                )
-                if analysis.is_json:
-                    file_json_lines += 1
-                    file_json_template_keys[analysis.json_structure_key] = (
-                        file_json_template_keys.get(analysis.json_structure_key, 0) + 1
-                    )
-            file_meta.append((rel, False, cached_lines))
-            total_lines += file_total_lines
-            for tkey, count in file_legacy_tpl_count.items():
-                legacy_tpl_count[tkey] = legacy_tpl_count.get(tkey, 0) + count
-            for tkey, count in file_tpl_count.items():
-                tpl_count[tkey] = tpl_count.get(tkey, 0) + count
-            for skeleton, count in file_normalized_tpl_count.items():
-                normalized_tpl_count[skeleton] = (
-                    normalized_tpl_count.get(skeleton, 0) + count
-                )
-            json_lines_detected += file_json_lines
-            for json_key, count in file_json_template_keys.items():
-                json_template_keys[json_key] = (
-                    json_template_keys.get(json_key, 0) + count
-                )
-        except UnicodeDecodeError:
+    if n_workers > 1:
+        # Parallel pass 1.  Each worker tokenises its files independently
+        # using its own line_intern + local_tok_cache; the master re-interns
+        # and merges below so cross-worker line repetition is dedup'd at
+        # archive build time.
+        chunksize = max(1, len(work_items) // (n_workers * 4))
+        with ProcessPoolExecutor(max_workers=n_workers) as ex:
+            results = list(
+                ex.map(_tokenize_one_file_unpack, work_items, chunksize=chunksize)
+            )
+    else:
+        results = [_tokenize_one_file(*item) for item in work_items]
+
+    for result in results:
+        (
+            rel,
+            is_binary,
+            cached_lines,
+            local_tok_cache,
+            local_legacy_tok_cache,
+            file_tpl_count,
+            file_legacy_tpl_count,
+            file_normalized_tpl_count,
+            file_json_template_keys,
+            file_total_lines,
+            file_json_lines,
+        ) = result
+        if is_binary:
             file_meta.append((rel, True, None))
+            continue
+        # Re-intern this file's lines through the master line_intern dict so
+        # equal lines appearing in different worker chunks share one string.
+        interned_lines = [line_intern.setdefault(L, L) for L in cached_lines]
+        file_meta.append((rel, False, interned_lines))
+        for line, analysis in local_tok_cache.items():
+            canonical = line_intern.setdefault(line, line)
+            if canonical not in tok_cache:
+                tok_cache[canonical] = analysis
+        if local_legacy_tok_cache is not None:
+            for line, ana in local_legacy_tok_cache.items():
+                canonical = line_intern.setdefault(line, line)
+                if canonical not in legacy_tok_cache:
+                    legacy_tok_cache[canonical] = ana
+        total_lines += file_total_lines
+        json_lines_detected += file_json_lines
+        for tkey, count in file_tpl_count.items():
+            tpl_count[tkey] = tpl_count.get(tkey, 0) + count
+        for tkey, count in file_legacy_tpl_count.items():
+            legacy_tpl_count[tkey] = legacy_tpl_count.get(tkey, 0) + count
+        for skeleton, count in file_normalized_tpl_count.items():
+            normalized_tpl_count[skeleton] = (
+                normalized_tpl_count.get(skeleton, 0) + count
+            )
+        for json_key, count in file_json_template_keys.items():
+            json_template_keys[json_key] = (
+                json_template_keys.get(json_key, 0) + count
+            )
+
     t_tokenize_s = time.perf_counter() - t_tokenize_start
     t_count_s = 0.0  # tokenise and count are combined in a single pass above
 
