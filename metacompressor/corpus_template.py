@@ -290,6 +290,15 @@ _GENERIC_VAR_PATTERNS = [
     ("number", _NUMBER_RE),
 ]
 
+
+def _combined_pattern_part(kind: str, pattern: re.Pattern[str]) -> str:
+    """Return a named-group regex fragment while preserving pattern flags."""
+    body = pattern.pattern
+    if pattern.flags & re.IGNORECASE:
+        body = f"(?i:{body})"
+    return f"(?P<{kind}>{body})"
+
+
 # Single combined alternation across the 11 generic patterns above.  Python
 # re's alternation returns the FIRST listed alternative that matches at the
 # leftmost position; the order above is from longest-to-shortest practical
@@ -299,8 +308,7 @@ _GENERIC_VAR_PATTERNS = [
 # representative corpus.
 _COMBINED_VAR_RE = re.compile(
     "|".join(
-        "(?P<%s>%s)" % (kind, pattern.pattern)
-        for kind, pattern in _GENERIC_VAR_PATTERNS
+        _combined_pattern_part(kind, pattern) for kind, pattern in _GENERIC_VAR_PATTERNS
     )
 )
 

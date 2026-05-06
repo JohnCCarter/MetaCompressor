@@ -370,6 +370,12 @@ def build_parser() -> argparse.ArgumentParser:
             "yields no measurable benefit on diverse data."
         ),
     )
+    p_compress.add_argument(
+        "--no-delta",
+        action="store_false",
+        dest="delta",
+        help=argparse.SUPPRESS,
+    )
     p_compress.set_defaults(func=cmd_compress)
 
     p_decompress = sub.add_parser("decompress", help="Decompress a .mc1 file")
@@ -401,6 +407,12 @@ def build_parser() -> argparse.ArgumentParser:
             "chunks.  Off by default: the similarity scan is expensive and "
             "yields no measurable benefit on diverse corpora."
         ),
+    )
+    p_compress_dir.add_argument(
+        "--no-delta",
+        action="store_false",
+        dest="delta",
+        help=argparse.SUPPRESS,
     )
     p_compress_dir.set_defaults(func=cmd_compress_dir)
 
