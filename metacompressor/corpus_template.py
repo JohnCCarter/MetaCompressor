@@ -86,11 +86,16 @@ decompress_corpus_template(data, output_dir)            -> list[str]
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import io
+import os
 import re
+import sys
 import tarfile
 import time
 from collections.abc import Iterator
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -98,13 +103,86 @@ from typing import Any, Dict, List, Optional, Tuple
 import msgpack
 import zstandard as zstd
 
+from metacompressor.container import _zstd_threads
+
+# Optional native tokenizer (Rust extension via PyO3).  When present,
+# _scan_text_line dispatches to a C-fast implementation that scans for
+# variables and computes the normalized skeleton in one FFI call.
+# The Rust path is differential-tested against the Python path in
+# tests/test_tokenizer_golden.py so output bytes are byte-identical.
+# Set MC_DISABLE_NATIVE_TOKENIZER=1 to force the Python path even when
+# the extension is installed (useful for benchmarking and fixture
+# stability).
+try:
+    if os.environ.get("MC_DISABLE_NATIVE_TOKENIZER", "").strip() in (
+        "1",
+        "true",
+        "True",
+    ):
+        _NATIVE_TOKENIZER = None  # type: ignore[assignment]
+    else:
+        import mc_tokenizer_rs as _NATIVE_TOKENIZER  # type: ignore[import-not-found]
+except ImportError:
+    _NATIVE_TOKENIZER = None  # type: ignore[assignment]
+else:
+
+    def _load_mc_tokenizer_extension() -> object | None:
+        """Best-effort load of the compiled extension even if a namespace package shadows it.
+
+        If the repo root contains `mc_tokenizer_rs/` without a built `.pyd`, Python may
+        resolve it as a namespace package first. When a wheel is installed, a compiled
+        `mc_tokenizer_rs*.pyd` will exist somewhere on sys.path; we load it explicitly.
+        """
+
+        expected = ("analyze_text", "scan_line", "normalize_part")
+        if _NATIVE_TOKENIZER is not None and all(
+            hasattr(_NATIVE_TOKENIZER, name) for name in expected
+        ):
+            return _NATIVE_TOKENIZER
+
+        module_name = "mc_tokenizer_rs"
+        for entry in list(sys.path):
+            try:
+                base = Path(entry)
+            except Exception:
+                continue
+            if not base.exists() or not base.is_dir():
+                continue
+            try:
+                for candidate in base.rglob("mc_tokenizer_rs*.pyd"):
+                    loader = importlib.machinery.ExtensionFileLoader(
+                        module_name, str(candidate)
+                    )
+                    spec = importlib.util.spec_from_file_location(
+                        module_name, str(candidate), loader=loader
+                    )
+                    if spec is None or spec.loader is None:
+                        continue
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+                    if all(hasattr(mod, name) for name in expected):
+                        return mod
+            except Exception:
+                continue
+        return None
+
+    _NATIVE_TOKENIZER = _load_mc_tokenizer_extension()  # type: ignore[assignment]
+
 # ---------------------------------------------------------------------------
 # Format constants
 # ---------------------------------------------------------------------------
 
 MAGIC = b"MCK\x00"
 VERSION = 0x01
+# Baseline level used by _build_tarzstd_bytes (the plain TAR+ZSTD baseline
+# against which MC's template archive is compared).  Keep at 3 so the
+# benchmark baseline matches typical ZSTD usage.
 _ZSTD_LEVEL = 3
+# Level used when packing payloads where MC has already extracted templates
+# and emitted varint/columnar/dictionary encodings.  Most of the structure
+# ZSTD's level-3 search would recover has already been pulled out by MC, so
+# level 1 captures the remaining gains at a fraction of the CPU cost.
+_ZSTD_LEVEL_STRUCTURED = 1
 _MIN_TEMPLATE_OCCURRENCES = 2
 _MODE_RAW_TAR_ZSTD = "raw_tar_zstd"
 _MODE_ROW_V1 = "corpus_template_row_v1"
@@ -212,6 +290,20 @@ _GENERIC_VAR_PATTERNS = [
     ("number", _NUMBER_RE),
 ]
 
+# Single combined alternation across the 11 generic patterns above.  Python
+# re's alternation returns the FIRST listed alternative that matches at the
+# leftmost position; the order above is from longest-to-shortest practical
+# match, which matches the per-position "longest wins" tie-break that the
+# legacy multi-search loop applied.  A golden differential test
+# (``test_tokenizer_golden.py``) asserts per-line equivalence across a
+# representative corpus.
+_COMBINED_VAR_RE = re.compile(
+    "|".join(
+        "(?P<%s>%s)" % (kind, pattern.pattern)
+        for kind, pattern in _GENERIC_VAR_PATTERNS
+    )
+)
+
 
 def _tokenize_legacy(line: str) -> Tuple[Tuple[str, ...], List[str]]:
     """Return the legacy structure-extraction split for *line*."""
@@ -254,35 +346,27 @@ def _normalized_skeleton(
     return tuple(skeleton)
 
 
+_JSON_WS_RE = re.compile(r"[ \t\r\n]*")
+_JSON_STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"', re.DOTALL)
+_JSON_NUMBER_RE = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?")
+
+
 def _json_skip_ws(text: str, index: int) -> int:
-    while index < len(text) and text[index] in " \t\r\n":
-        index += 1
-    return index
+    return _JSON_WS_RE.match(text, index).end()
 
 
 def _json_parse_string(text: str, index: int) -> int:
-    if index >= len(text) or text[index] != '"':
+    match = _JSON_STRING_RE.match(text, index)
+    if match is None:
         raise ValueError("expected JSON string")
-    index += 1
-    while index < len(text):
-        char = text[index]
-        if char == "\\":
-            index += 2
-            continue
-        if char == '"':
-            return index + 1
-        index += 1
-    raise ValueError("unterminated JSON string")
+    return match.end()
 
 
 def _json_parse_number(text: str, index: int) -> int:
-    match = re.match(
-        r"-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?",
-        text[index:],
-    )
+    match = _JSON_NUMBER_RE.match(text, index)
     if match is None:
         raise ValueError("invalid JSON number")
-    return index + match.end()
+    return match.end()
 
 
 def _json_collect_leaves(
@@ -427,7 +511,12 @@ def _analyze_json_line(line: str) -> Optional[_LineAnalysis]:
     )
 
 
-def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]:
+def _find_next_variable_legacy(line: str, start: int) -> Optional[Tuple[int, int, str]]:
+    """Reference implementation kept only for the golden differential test.
+
+    Calls 12 separate regex searches per cursor position.  The production
+    path uses :func:`_find_next_variable` with a single combined regex.
+    """
     best: Optional[Tuple[int, int, str]] = None
 
     key_match = _KEY_VALUE_RE.search(line, start)
@@ -453,8 +542,38 @@ def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]
     return best
 
 
+def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]:
+    best: Optional[Tuple[int, int, str]] = None
+
+    key_match = _KEY_VALUE_RE.search(line, start)
+    if key_match is not None:
+        best = (
+            key_match.start("value"),
+            key_match.end("value"),
+            "kv:%s" % key_match.group("key").lower(),
+        )
+
+    generic_match = _COMBINED_VAR_RE.search(line, start)
+    if generic_match is not None:
+        candidate = (
+            generic_match.start(),
+            generic_match.end(),
+            generic_match.lastgroup,
+        )
+        if (
+            best is None
+            or candidate[0] < best[0]
+            or (candidate[0] == best[0] and candidate[1] > best[1])
+        ):
+            best = candidate
+
+    return best
+
+
 def _scan_text_line(line: str) -> _LineAnalysis:
     """Extract a deterministic template and column values from a text line."""
+    if _NATIVE_TOKENIZER is not None:
+        return _scan_text_line_native(line)
     parts: List[str] = []
     values: List[str] = []
     value_kinds: List[str] = []
@@ -483,6 +602,19 @@ def _scan_text_line(line: str) -> _LineAnalysis:
     )
 
 
+def _scan_text_line_native(line: str) -> _LineAnalysis:
+    """Native (Rust) implementation: scan + skeleton in one FFI call."""
+    parts, values, kinds, skeleton = _NATIVE_TOKENIZER.analyze_text(line)
+    return _LineAnalysis(
+        template_parts=tuple(parts),
+        values=values,
+        normalized_skeleton=tuple(skeleton),
+        value_kinds=tuple(kinds),
+        is_json=False,
+        json_structure_key=(),
+    )
+
+
 def _analyze_line(line: str) -> _LineAnalysis:
     """Return structure-v2 analysis for *line*."""
     json_analysis = _analyze_json_line(line)
@@ -495,6 +627,145 @@ def _tokenize(line: str) -> Tuple[Tuple[str, ...], List[str]]:
     """Return the structure-v2 template parts and values for *line*."""
     analysis = _analyze_line(line)
     return analysis.template_parts, list(analysis.values)
+
+
+# ---------------------------------------------------------------------------
+# Per-file tokenisation worker (used by both serial and parallel pass 1)
+# ---------------------------------------------------------------------------
+#
+# Module-level so it is picklable for ProcessPoolExecutor.  Returns a tuple
+# (rather than a dataclass) to keep IPC overhead minimal — workers pickle
+# their result on the way back to the master, and the dict-of-counts +
+# tok_cache fragments dominate the payload size.
+#
+# Layout of the returned tuple:
+#   ( rel,
+#     is_binary,
+#     cached_lines | None,
+#     local_tok_cache,                    # str -> _LineAnalysis
+#     local_legacy_tok_cache | None,      # str -> (template, values)
+#     file_tpl_count,                     # template_parts -> count
+#     file_legacy_tpl_count,              # legacy template -> count
+#     file_normalized_tpl_count,          # normalized skeleton -> count
+#     file_json_template_keys,            # json structure key -> count
+#     file_total_lines,
+#     file_json_lines )
+
+
+def _tokenize_one_file(
+    file_path: Path,
+    rel: str,
+    structure_v2_enabled: bool,
+    compute_legacy_metrics: bool,
+) -> tuple:
+    """Tokenise a single file and return the per-file state for merging."""
+    legacy_needed = compute_legacy_metrics or not structure_v2_enabled
+
+    file_legacy_tpl_count: Dict[Tuple[str, ...], int] = {}
+    file_tpl_count: Dict[Tuple[str, ...], int] = {}
+    file_normalized_tpl_count: Dict[Tuple[str, ...], int] = {}
+    file_json_template_keys: Dict[Tuple[str, ...], int] = {}
+    file_total_lines = 0
+    file_json_lines = 0
+    cached_lines: List[str] = []
+
+    line_intern: Dict[str, str] = {}
+    local_tok_cache: Dict[str, _LineAnalysis] = {}
+    local_legacy_tok_cache: Dict[str, Tuple[Tuple[str, ...], List[str]]] = {}
+
+    try:
+        for raw_line in _iter_text_lines(file_path):
+            line = line_intern.setdefault(raw_line, raw_line)
+            cached_lines.append(line)
+            file_total_lines += 1
+            if legacy_needed:
+                if line not in local_legacy_tok_cache:
+                    local_legacy_tok_cache[line] = _tokenize_legacy(line)
+                legacy_tkey = local_legacy_tok_cache[line][0]
+                file_legacy_tpl_count[legacy_tkey] = (
+                    file_legacy_tpl_count.get(legacy_tkey, 0) + 1
+                )
+
+            if line not in local_tok_cache:
+                local_tok_cache[line] = (
+                    _analyze_line(line)
+                    if structure_v2_enabled
+                    else _LineAnalysis(
+                        template_parts=local_legacy_tok_cache[line][0],
+                        values=list(local_legacy_tok_cache[line][1]),
+                        normalized_skeleton=_normalized_skeleton(
+                            local_legacy_tok_cache[line][0],
+                            tuple("legacy" for _ in local_legacy_tok_cache[line][1]),
+                            (),
+                        ),
+                        value_kinds=tuple(
+                            "legacy" for _ in local_legacy_tok_cache[line][1]
+                        ),
+                        is_json=False,
+                        json_structure_key=(),
+                    )
+                )
+            analysis = local_tok_cache[line]
+            tkey = analysis.template_parts
+            file_tpl_count[tkey] = file_tpl_count.get(tkey, 0) + 1
+            file_normalized_tpl_count[analysis.normalized_skeleton] = (
+                file_normalized_tpl_count.get(analysis.normalized_skeleton, 0) + 1
+            )
+            if analysis.is_json:
+                file_json_lines += 1
+                file_json_template_keys[analysis.json_structure_key] = (
+                    file_json_template_keys.get(analysis.json_structure_key, 0) + 1
+                )
+        return (
+            rel,
+            False,
+            cached_lines,
+            local_tok_cache,
+            local_legacy_tok_cache if legacy_needed else None,
+            file_tpl_count,
+            file_legacy_tpl_count,
+            file_normalized_tpl_count,
+            file_json_template_keys,
+            file_total_lines,
+            file_json_lines,
+        )
+    except UnicodeDecodeError:
+        return (rel, True, None, {}, None, {}, {}, {}, {}, 0, 0)
+
+
+def _tokenize_one_file_unpack(args) -> tuple:
+    """ProcessPoolExecutor.map shim — unpacks the args tuple."""
+    return _tokenize_one_file(*args)
+
+
+def _decide_tokenize_workers(num_files: int, total_bytes: int) -> int:
+    """Decide how many worker processes to use for pass 1.
+
+    Override via ``MC_TOKENIZE_WORKERS``: ``"1"`` forces serial, ``">1"``
+    forces that many workers (capped at CPU count), missing/0 → auto.
+
+    Auto-rules: serial when fewer than 4 files OR less than 2 MiB total
+    (process startup overhead dominates).  Otherwise scale to the smaller
+    of CPU count, file count, and a hard cap of 8.
+    """
+    env_str = os.environ.get("MC_TOKENIZE_WORKERS", "").strip()
+    if env_str:
+        try:
+            n = int(env_str)
+        except ValueError:
+            n = 0
+        if n == 1:
+            return 1
+        if n > 1:
+            return min(n, os.cpu_count() or 1)
+        # n <= 0 → fall through to auto
+
+    if num_files < 4:
+        return 1
+    if total_bytes < 2 * 1024 * 1024:
+        return 1
+    cpus = os.cpu_count() or 1
+    return min(cpus, num_files, 8)
 
 
 def _template_string(text_parts: Tuple[str, ...]) -> str:
@@ -543,10 +814,14 @@ def _iter_text_lines(file_path: Path) -> Iterator[str]:
         yield ""
 
 
-def _pack_archive_payload(payload: dict, level: int = _ZSTD_LEVEL) -> bytes:
+def _pack_archive_payload(payload: dict, level: int = _ZSTD_LEVEL_STRUCTURED) -> bytes:
     """Pack *payload* as an ``.mck`` archive."""
     raw = msgpack.packb(payload, use_bin_type=True)
-    return MAGIC + bytes([VERSION]) + zstd.ZstdCompressor(level=level).compress(raw)
+    return (
+        MAGIC
+        + bytes([VERSION])
+        + zstd.ZstdCompressor(level=level, threads=_zstd_threads()).compress(raw)
+    )
 
 
 def _build_tarzstd_bytes(input_dir: Path, all_files: List[Path]) -> bytes:
@@ -897,7 +1172,7 @@ def _decode_row_refs(encoded_row_refs: Any) -> List[List[int]]:
 def _build_row_template_archive(
     input_dir: Path,
     all_files: List[Path],
-    file_meta: List[Tuple[str, bool]],
+    file_meta: List[Tuple[str, bool, Optional[List[str]]]],
     tok_cache: Dict[str, _LineAnalysis],
     tpl_to_id: Dict[Tuple[str, ...], int],
     tpl_strings: List[str],
@@ -915,9 +1190,9 @@ def _build_row_template_archive(
     output.write(MAGIC + bytes([VERSION]))
     packer = msgpack.Packer(use_bin_type=True)
 
-    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
-        output, closefd=False
-    ) as compressor:
+    with zstd.ZstdCompressor(
+        level=_ZSTD_LEVEL_STRUCTURED, threads=_zstd_threads()
+    ).stream_writer(output, closefd=False) as compressor:
         compressor.write(packer.pack_map_header(2))
         compressor.write(packer.pack("templates"))
         compressor.write(packer.pack(tpl_strings))
@@ -925,7 +1200,7 @@ def _build_row_template_archive(
         compressor.write(packer.pack_array_header(len(all_files)))
 
         t_serialize_start = time.perf_counter()
-        for file_path, (rel, is_binary) in zip(all_files, file_meta):
+        for file_path, (rel, is_binary, cached_lines) in zip(all_files, file_meta):
             if is_binary:
                 raw = file_path.read_bytes()
                 binary_fallback_files += 1
@@ -935,12 +1210,12 @@ def _build_row_template_archive(
                 compressor.write(packer.pack({"path": rel, "records": [[-2, raw]]}))
                 continue
 
+            assert cached_lines is not None
             file_tpl_lines = 0
             file_raw_lines = 0
             file_var_total = 0
-            file_total_lines = 0
-            for line in _iter_text_lines(file_path):
-                file_total_lines += 1
+            file_total_lines = len(cached_lines)
+            for line in cached_lines:
                 analysis = tok_cache[line]
                 tkey = analysis.template_parts
                 if tkey in tpl_to_id:
@@ -977,7 +1252,7 @@ def _build_row_template_archive(
                 compressor.write(packer.pack(rel))
                 compressor.write(packer.pack("records"))
                 compressor.write(packer.pack_array_header(file_total_lines))
-                for line in _iter_text_lines(file_path):
+                for line in cached_lines:
                     analysis = tok_cache[line]
                     tkey = analysis.template_parts
                     tpl_id = tpl_to_id.get(tkey)
@@ -1046,9 +1321,9 @@ def _pack_columnar_archive(
     output.write(MAGIC + bytes([VERSION]))
     packer = msgpack.Packer(use_bin_type=True)
 
-    with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
-        output, closefd=False
-    ) as compressor:
+    with zstd.ZstdCompressor(
+        level=_ZSTD_LEVEL_STRUCTURED, threads=_zstd_threads()
+    ).stream_writer(output, closefd=False) as compressor:
         compressor.write(packer.pack_map_header(6))
         compressor.write(packer.pack("mode"))
         compressor.write(packer.pack(mode))
@@ -1076,7 +1351,7 @@ def _pack_columnar_archive(
 
 def _build_columnar_template_archive(
     all_files: List[Path],
-    file_meta: List[Tuple[str, bool]],
+    file_meta: List[Tuple[str, bool, Optional[List[str]]]],
     tok_cache: Dict[str, _LineAnalysis],
     tpl_to_id: Dict[Tuple[str, ...], int],
     tpl_strings: List[str],
@@ -1099,7 +1374,7 @@ def _build_columnar_template_archive(
     raw_column_fallback_count = 0
 
     t_encode_start = time.perf_counter()
-    for file_path, (rel, is_binary) in zip(all_files, file_meta):
+    for file_path, (rel, is_binary, cached_lines) in zip(all_files, file_meta):
         file_id = len(files_payload)
         if is_binary:
             files_payload.append(
@@ -1113,13 +1388,13 @@ def _build_columnar_template_archive(
             )
             continue
 
+        assert cached_lines is not None
         file_tpl_lines = 0
         file_raw_lines = 0
         file_var_total = 0
-        file_total_lines = 0
+        file_total_lines = len(cached_lines)
 
-        for line in _iter_text_lines(file_path):
-            file_total_lines += 1
+        for line in cached_lines:
             analysis = tok_cache[line]
             tkey = analysis.template_parts
             tpl_id = tpl_to_id.get(tkey)
@@ -1160,7 +1435,7 @@ def _build_columnar_template_archive(
         raw_fallback_lines += file_raw_lines
         total_var_slots += file_var_total
 
-        for line_index, line in enumerate(_iter_text_lines(file_path)):
+        for line_index, line in enumerate(cached_lines):
             analysis = tok_cache[line]
             tkey = analysis.template_parts
             tpl_id = tpl_to_id.get(tkey)
@@ -1262,6 +1537,7 @@ def _template_reuse_rate(
 def compress_corpus_template(
     input_dir: Path,
     structure_v2_enabled: bool = True,
+    compute_legacy_metrics: bool = False,
 ) -> bytes:
     """Compress all files under *input_dir* using a shared template dictionary.
 
@@ -1270,12 +1546,14 @@ def compress_corpus_template(
     return compress_corpus_template_with_metrics(
         input_dir,
         structure_v2_enabled=structure_v2_enabled,
+        compute_legacy_metrics=compute_legacy_metrics,
     )[0]
 
 
 def compress_corpus_template_with_metrics(
     input_dir: Path,
     structure_v2_enabled: bool = True,
+    compute_legacy_metrics: bool = False,
 ) -> Tuple[bytes, dict]:
     """Compress all files under *input_dir* using a shared template dictionary.
 
@@ -1370,8 +1648,24 @@ def compress_corpus_template_with_metrics(
     # -----------------------------------------------------------------------
     t_extract_start = time.perf_counter()
 
-    # file_meta stores (rel_path, is_binary) only — no raw bytes between passes.
-    file_meta: List[Tuple[str, bool]] = []
+    # file_meta stores (rel_path, is_binary, cached_lines).  cached_lines is
+    # None for binary files; for text files it is the per-file ordered list
+    # of line strings, where each string is interned via line_intern below so
+    # duplicates across the corpus share a single object.  The downstream
+    # archive builders consume cached_lines directly, eliminating the second
+    # and third disk reads they would otherwise perform.
+    file_meta: List[Tuple[str, bool, Optional[List[str]]]] = []
+
+    # Interns line strings across all files so cached_lines memory is
+    # O(unique_lines × avg_line_len) instead of O(total_lines × avg_line_len).
+    line_intern: Dict[str, str] = {}
+
+    # The legacy tokeniser only feeds the explainability metric
+    # ``template_reuse_before``.  Skip it on the hot path unless the caller
+    # explicitly requests legacy metrics or has disabled structure_v2 (in
+    # which case _LineAnalysis falls back to legacy_tok_cache to build its
+    # template_parts).
+    legacy_needed = compute_legacy_metrics or not structure_v2_enabled
 
     # tok_cache: unique line → (template_key, variable_values).
     # One regex call per *unique* line; for repetitive corpora this reduces
@@ -1386,72 +1680,74 @@ def compress_corpus_template_with_metrics(
     json_template_keys: Dict[Tuple[str, ...], int] = {}
 
     t_tokenize_start = time.perf_counter()
-    for file_path in all_files:
-        rel = file_path.relative_to(input_dir).as_posix()
-        file_legacy_tpl_count: Dict[Tuple[str, ...], int] = {}
-        file_tpl_count: Dict[Tuple[str, ...], int] = {}
-        file_normalized_tpl_count: Dict[Tuple[str, ...], int] = {}
-        file_json_template_keys: Dict[Tuple[str, ...], int] = {}
-        file_total_lines = 0
-        file_json_lines = 0
-        try:
-            for line in _iter_text_lines(file_path):
-                file_total_lines += 1
-                if line not in legacy_tok_cache:
-                    legacy_tok_cache[line] = _tokenize_legacy(line)
-                legacy_tkey = legacy_tok_cache[line][0]
-                file_legacy_tpl_count[legacy_tkey] = (
-                    file_legacy_tpl_count.get(legacy_tkey, 0) + 1
-                )
+    work_items = [
+        (
+            file_path,
+            file_path.relative_to(input_dir).as_posix(),
+            structure_v2_enabled,
+            compute_legacy_metrics,
+        )
+        for file_path in all_files
+    ]
+    total_corpus_bytes = sum(p.stat().st_size for p in all_files)
+    n_workers = _decide_tokenize_workers(len(all_files), total_corpus_bytes)
 
-                if line not in tok_cache:
-                    tok_cache[line] = (
-                        _analyze_line(line)
-                        if structure_v2_enabled
-                        else _LineAnalysis(
-                            template_parts=legacy_tok_cache[line][0],
-                            values=list(legacy_tok_cache[line][1]),
-                            normalized_skeleton=_normalized_skeleton(
-                                legacy_tok_cache[line][0],
-                                tuple("legacy" for _ in legacy_tok_cache[line][1]),
-                                (),
-                            ),
-                            value_kinds=tuple(
-                                "legacy" for _ in legacy_tok_cache[line][1]
-                            ),
-                            is_json=False,
-                            json_structure_key=(),
-                        )
-                    )
-                analysis = tok_cache[line]
-                tkey = analysis.template_parts
-                file_tpl_count[tkey] = file_tpl_count.get(tkey, 0) + 1
-                file_normalized_tpl_count[analysis.normalized_skeleton] = (
-                    file_normalized_tpl_count.get(analysis.normalized_skeleton, 0) + 1
-                )
-                if analysis.is_json:
-                    file_json_lines += 1
-                    file_json_template_keys[analysis.json_structure_key] = (
-                        file_json_template_keys.get(analysis.json_structure_key, 0) + 1
-                    )
-            file_meta.append((rel, False))
-            total_lines += file_total_lines
-            for tkey, count in file_legacy_tpl_count.items():
-                legacy_tpl_count[tkey] = legacy_tpl_count.get(tkey, 0) + count
-            for tkey, count in file_tpl_count.items():
-                tpl_count[tkey] = tpl_count.get(tkey, 0) + count
-            for skeleton, count in file_normalized_tpl_count.items():
-                normalized_tpl_count[skeleton] = (
-                    normalized_tpl_count.get(skeleton, 0) + count
-                )
-            json_lines_detected += file_json_lines
-            for json_key, count in file_json_template_keys.items():
-                json_template_keys[json_key] = (
-                    json_template_keys.get(json_key, 0) + count
-                )
-        except UnicodeDecodeError:
-            file_meta.append((rel, True))
-        # raw, text, lines are freed at end of each iteration — O(1 file) peak.
+    if n_workers > 1:
+        # Parallel pass 1.  Each worker tokenises its files independently
+        # using its own line_intern + local_tok_cache; the master re-interns
+        # and merges below so cross-worker line repetition is dedup'd at
+        # archive build time.
+        chunksize = max(1, len(work_items) // (n_workers * 4))
+        with ProcessPoolExecutor(max_workers=n_workers) as ex:
+            results = list(
+                ex.map(_tokenize_one_file_unpack, work_items, chunksize=chunksize)
+            )
+    else:
+        results = [_tokenize_one_file(*item) for item in work_items]
+
+    for result in results:
+        (
+            rel,
+            is_binary,
+            cached_lines,
+            local_tok_cache,
+            local_legacy_tok_cache,
+            file_tpl_count,
+            file_legacy_tpl_count,
+            file_normalized_tpl_count,
+            file_json_template_keys,
+            file_total_lines,
+            file_json_lines,
+        ) = result
+        if is_binary:
+            file_meta.append((rel, True, None))
+            continue
+        # Re-intern this file's lines through the master line_intern dict so
+        # equal lines appearing in different worker chunks share one string.
+        interned_lines = [line_intern.setdefault(L, L) for L in cached_lines]
+        file_meta.append((rel, False, interned_lines))
+        for line, analysis in local_tok_cache.items():
+            canonical = line_intern.setdefault(line, line)
+            if canonical not in tok_cache:
+                tok_cache[canonical] = analysis
+        if local_legacy_tok_cache is not None:
+            for line, ana in local_legacy_tok_cache.items():
+                canonical = line_intern.setdefault(line, line)
+                if canonical not in legacy_tok_cache:
+                    legacy_tok_cache[canonical] = ana
+        total_lines += file_total_lines
+        json_lines_detected += file_json_lines
+        for tkey, count in file_tpl_count.items():
+            tpl_count[tkey] = tpl_count.get(tkey, 0) + count
+        for tkey, count in file_legacy_tpl_count.items():
+            legacy_tpl_count[tkey] = legacy_tpl_count.get(tkey, 0) + count
+        for skeleton, count in file_normalized_tpl_count.items():
+            normalized_tpl_count[skeleton] = (
+                normalized_tpl_count.get(skeleton, 0) + count
+            )
+        for json_key, count in file_json_template_keys.items():
+            json_template_keys[json_key] = json_template_keys.get(json_key, 0) + count
+
     t_tokenize_s = time.perf_counter() - t_tokenize_start
     t_count_s = 0.0  # tokenise and count are combined in a single pass above
 
@@ -1546,7 +1842,9 @@ def compress_corpus_template_with_metrics(
         total_var_slots / template_reuse_count if template_reuse_count > 0 else 0.0
     )
     reuse_rate = template_reuse_count / total_lines if total_lines > 0 else 0.0
-    template_reuse_before = _template_reuse_rate(legacy_tpl_count, total_lines)
+    template_reuse_before = (
+        _template_reuse_rate(legacy_tpl_count, total_lines) if legacy_needed else None
+    )
     template_reuse_after = _template_reuse_rate(tpl_count, total_lines)
 
     metrics = {

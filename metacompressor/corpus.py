@@ -28,7 +28,7 @@ from metacompressor.utils import CHUNK_SIZE, chunk_data, hash_chunk
 def compress_corpus(
     input_dir: Path,
     chunk_size: int = CHUNK_SIZE,
-    use_delta: bool = True,
+    use_delta: bool = False,
 ) -> bytes:
     """Compress all files under *input_dir* into a single .mc1dir byte string.
 
@@ -50,10 +50,13 @@ def compress_corpus(
         Size of each chunk in bytes (default: 4096).  Must be the same value
         for compress and decompress; the value is embedded in the archive.
     use_delta:
-        When ``True`` (default), attempt intra-chunk delta encoding for
-        near-duplicate chunks.  Set to ``False`` to disable delta encoding
-        and store every unique chunk verbatim — useful for benchmarking or
-        when the corpus is known to have low cross-chunk similarity.
+        When ``True``, attempt intra-chunk delta encoding for near-duplicate
+        chunks.  Defaults to ``False`` because the similarity scan is
+        expensive (pure-Python byte comparison across up to MAX_CANDIDATES
+        recent chunks) and yields no measurable ratio benefit on diverse
+        corpora (see ``results/delta_benchmark.md``).  Enable explicitly when
+        the corpus is known to contain many same-length near-duplicate
+        chunks (e.g. binary diffs, snapshot series).
 
     Returns
     -------

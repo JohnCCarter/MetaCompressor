@@ -205,7 +205,7 @@ class TestDeltaEncoded:
     def test_delta_chunks_present_in_container(self):
         """At least one delta chunk should appear for highly-similar data."""
         data = self._similar_data()
-        mc1 = compress(data)
+        mc1 = compress(data, use_delta=True)
         deserialise(mc1)
         # deserialise resolves deltas into chunks; verify by checking the raw payload
         import msgpack
@@ -222,13 +222,12 @@ class TestDeltaEncoded:
         """For highly similar chunks, delta encoding should reduce the raw payload."""
         data = self._similar_data(30)
 
-        # Compress with delta (default)
-        mc1_with_delta = compress(data)
+        mc1_with_delta = compress(data, use_delta=True)
 
         # Compress without delta by using random data of same size (all unique)
         # — just verify the similar data is smaller than random data of same size
         random_data = os.urandom(len(data))
-        mc1_random = compress(random_data)
+        mc1_random = compress(random_data, use_delta=True)
 
         # Similar data with deltas should compress much better than random
         assert len(mc1_with_delta) < len(mc1_random)
@@ -243,7 +242,7 @@ class TestDeltaFallback:
     def test_random_data_no_delta_chunks(self):
         """Purely random data has no similar chunks; no deltas should appear."""
         data = os.urandom(CHUNK_SIZE * 20)
-        mc1 = compress(data)
+        mc1 = compress(data, use_delta=True)
 
         import msgpack
         import zstandard as zstd
@@ -263,7 +262,7 @@ class TestDeltaFallback:
             similar_part += bytes(mutated)
         random_part = os.urandom(CHUNK_SIZE * 5)
         data = similar_part + random_part
-        assert decompress(compress(data)) == data
+        assert decompress(compress(data, use_delta=True)) == data
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +285,7 @@ class TestCorpusDelta:
         for name, content in files.items():
             (corpus_dir / name).write_bytes(content)
 
-        archive = compress_corpus(corpus_dir)
+        archive = compress_corpus(corpus_dir, use_delta=True)
         out_dir = tmp_path / "out"
         decompress_corpus(archive, out_dir)
 
@@ -303,7 +302,7 @@ class TestCorpusDelta:
             mutated[i * 50] = i + 1
             (corpus_dir / f"f{i}.bin").write_bytes(bytes(mutated))
 
-        archive = compress_corpus(corpus_dir)
+        archive = compress_corpus(corpus_dir, use_delta=True)
 
         import msgpack
         import zstandard as zstd
@@ -337,7 +336,7 @@ class TestCorpusDelta:
         for name, content in files.items():
             (corpus_dir / name).write_bytes(content)
 
-        archive = compress_corpus(corpus_dir)
+        archive = compress_corpus(corpus_dir, use_delta=True)
 
         cctx = zstd_mod.ZstdCompressor(level=3)
         zstd_total = sum(len(cctx.compress(d)) for d in files.values())
@@ -360,7 +359,7 @@ class TestDeltaDeterminism:
             m[i] = i
             chunks.append(bytes(m))
         data = b"".join(chunks)
-        assert compress(data) == compress(data)
+        assert compress(data, use_delta=True) == compress(data, use_delta=True)
 
     def test_corpus_delta_deterministic(self, tmp_path):
         base = b"\xee" * CHUNK_SIZE * 2
@@ -375,6 +374,6 @@ class TestDeltaDeterminism:
             d.mkdir(parents=True)
             for n, c in files.items():
                 (d / n).write_bytes(c)
-            return compress_corpus(d)
+            return compress_corpus(d, use_delta=True)
 
         assert build_and_compress("run1") == build_and_compress("run2")

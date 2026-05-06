@@ -38,7 +38,13 @@ def similarity(a: bytes, b: bytes) -> float:
     n = len(a)
     if n == 0 or len(b) != n:
         return 0.0
-    return sum(x == y for x, y in zip(a, b)) / n
+    mv_a = memoryview(a)
+    mv_b = memoryview(b)
+    matches = 0
+    for ba, bb in zip(mv_a, mv_b):
+        if ba == bb:
+            matches += 1
+    return matches / n
 
 
 def compute_delta(base: bytes, target: bytes) -> list[list[int]]:
@@ -49,7 +55,17 @@ def compute_delta(base: bytes, target: bytes) -> list[list[int]]:
     ``len(target)`` are not represented (the caller passes *target_len* to
     :func:`apply_delta` to handle truncation).
     """
-    return [[i, target[i]] for i in range(len(target)) if target[i] != base[i]]
+    target_len = len(target)
+    if target_len == 0:
+        return []
+    diffs: list[list[int]] = []
+    mv_base = memoryview(base)
+    mv_target = memoryview(target)
+    for i in range(target_len):
+        tv = mv_target[i]
+        if i >= len(mv_base) or mv_base[i] != tv:
+            diffs.append([i, int(tv)])
+    return diffs
 
 
 def apply_delta(base: bytes, diffs: list, target_len: int) -> bytes:
@@ -114,25 +130,39 @@ def find_similar_chunk(
     ``(base_chunk_id, diffs)`` if a suitable base is found, else ``None``.
     """
     chunk_len = len(chunk)
-    best_sim = threshold
-    best_id: int | None = None
-    best_diffs: list[list[int]] | None = None
+    if chunk_len == 0:
+        return None
 
-    # Scan the most-recently-added same-size candidates first.
     candidates = [
         cid
         for cid in reversed(recent_ids[-MAX_CANDIDATES:])
         if len(full_chunks.get(cid, b"")) == chunk_len
     ]
+    if not candidates:
+        return None
+
+    threshold_matches = (
+        int(threshold * chunk_len) + 1
+    )  # strictly greater than threshold
+
+    best_matches = threshold_matches - 1
+    best_id: int | None = None
+    best_base: bytes | None = None
 
     for cid in candidates:
         base = full_chunks[cid]
-        sim = similarity(base, chunk)
-        if sim > best_sim:
-            best_sim = sim
+        matches = 0
+        mv_base = memoryview(base)
+        mv_target = memoryview(chunk)
+        for ba, bb in zip(mv_base, mv_target):
+            if ba == bb:
+                matches += 1
+        if matches > best_matches:
+            best_matches = matches
             best_id = cid
-            best_diffs = compute_delta(base, chunk)
+            best_base = base
 
     if best_id is None:
         return None
-    return best_id, best_diffs  # type: ignore[return-value]
+    best_diffs = compute_delta(best_base, chunk)  # type: ignore[arg-type]
+    return best_id, best_diffs

@@ -48,10 +48,15 @@ def _get_chunking(args: argparse.Namespace) -> str:
 
 def cmd_compress(args: argparse.Namespace) -> None:
     data = _read(args.input)
-    mc1 = compress(data, chunking_mode=_get_chunking(args))
+    mc1 = compress(
+        data, chunking_mode=_get_chunking(args), use_delta=getattr(args, "delta", False)
+    )
     _write(args.output, mc1)
     ratio = len(mc1) / len(data) if data else float("nan")
-    print(f"Compressed {len(data):,} → {len(mc1):,} bytes  (ratio {ratio:.3f})")
+    delta_label = " (delta)" if getattr(args, "delta", False) else ""
+    print(
+        f"Compressed {len(data):,} → {len(mc1):,} bytes  (ratio {ratio:.3f}){delta_label}"
+    )
 
 
 def cmd_decompress(args: argparse.Namespace) -> None:
@@ -105,7 +110,7 @@ def cmd_compress_dir(args: argparse.Namespace) -> None:
     input_dir = Path(args.input_dir)
     output_path = Path(args.output)
 
-    use_delta = not args.no_delta
+    use_delta = bool(getattr(args, "delta", False))
 
     t0 = time.perf_counter()
     mc1dir = compress_corpus(input_dir, use_delta=use_delta)
@@ -113,10 +118,9 @@ def cmd_compress_dir(args: argparse.Namespace) -> None:
 
     output_path.write_bytes(mc1dir)
 
-    # Calculate total uncompressed size for reporting
     total_original = sum(p.stat().st_size for p in input_dir.rglob("*") if p.is_file())
     ratio = len(mc1dir) / total_original if total_original else float("nan")
-    delta_label = "" if use_delta else " (no delta)"
+    delta_label = " (delta)" if use_delta else ""
     print(
         f"Compressed {input_dir}  ({total_original:,} bytes across files){delta_label}\n"
         f"  → {output_path}  {len(mc1dir):,} bytes  ratio {ratio:.3f}  time {elapsed * 1000:.1f} ms"
@@ -317,7 +321,13 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     print(f"  Fuzzy merges        : {metrics['fuzzy_merge_count']:,}")
     print(f"  Template reuse count: {metrics['template_reuse_count']:,}")
     print(f"  Template reuse rate : {metrics['template_reuse_rate'] * 100:.1f}%")
-    print(f"  Reuse before        : {metrics['template_reuse_before'] * 100:.1f}%")
+    reuse_before = metrics.get("template_reuse_before")
+    if reuse_before is None:
+        print(
+            "  Reuse before        : (legacy metric off; pass compute_legacy_metrics=True)"
+        )
+    else:
+        print(f"  Reuse before        : {reuse_before * 100:.1f}%")
     print(f"  Reuse after         : {metrics['template_reuse_after'] * 100:.1f}%")
     print(f"  Raw fallback lines  : {metrics['raw_fallback_lines']:,}")
     print(f"  Binary fallback files:{metrics['binary_fallback_files']}")
@@ -350,6 +360,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=CHUNKING_FIXED,
         help="Chunking mode: 'fixed' (default) or 'cdc'",
     )
+    p_compress.add_argument(
+        "--delta",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable intra-chunk delta encoding for near-duplicate same-length "
+            "chunks.  Off by default: the similarity scan is expensive and "
+            "yields no measurable benefit on diverse data."
+        ),
+    )
     p_compress.set_defaults(func=cmd_compress)
 
     p_decompress = sub.add_parser("decompress", help="Decompress a .mc1 file")
@@ -373,10 +393,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_compress_dir.add_argument("input_dir", help="Input directory path")
     p_compress_dir.add_argument("output", help="Output .mc1dir file path")
     p_compress_dir.add_argument(
-        "--no-delta",
+        "--delta",
         action="store_true",
         default=False,
-        help="Disable intra-chunk delta encoding (store every unique chunk verbatim).",
+        help=(
+            "Enable intra-chunk delta encoding for near-duplicate same-length "
+            "chunks.  Off by default: the similarity scan is expensive and "
+            "yields no measurable benefit on diverse corpora."
+        ),
     )
     p_compress_dir.set_defaults(func=cmd_compress_dir)
 

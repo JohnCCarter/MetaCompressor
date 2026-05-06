@@ -11,6 +11,7 @@ dependencies = [
     "zstandard>=0.22",
     "xxhash>=3.0",
     "msgpack>=1.0",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +20,16 @@ dev = [
     "ruff>=0.9",
     "black>=24",
     "pre-commit>=4",
+]
+# Native tokenizer: a Rust extension that replaces _scan_text_line with
+# a C-fast implementation (3-4x per-line speedup on template-mode).
+# Build with: ``cd mc_tokenizer_rs && maturin build --release && pip install
+# target/wheels/mc_tokenizer_rs-*.whl``.  Pure-Python fallback runs when the
+# extension isn't installed; output is byte-identical (verified by
+# tests/test_tokenizer_golden.py).  Set MC_DISABLE_NATIVE_TOKENIZER=1 to
+# force the Python path even when the wheel is installed.
+native = [
+    "mc-tokenizer-rs",
 ]
 
 [project.scripts]
