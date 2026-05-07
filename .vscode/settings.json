@@ -2,5 +2,10 @@
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
   "python.testing.pytestArgs": ["metacompressor/tests"],
   "python.testing.unittestEnabled": false,
-  "python.testing.pytestEnabled": true
+  "python.testing.pytestEnabled": true,
+  "terminal.sourceControlRepositoriesKind": "integrated",
+  "scm.alwaysShowActions": true,
+  "scm.alwaysShowRepositories": true,
+  "git.showCursorWorktrees": true,
+  "scm.workingSets.enabled": true
 }
