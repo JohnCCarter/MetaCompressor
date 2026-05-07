@@ -89,6 +89,7 @@ def compress_corpus_differential(
     partial_reuse_experiment_enabled = _env_enabled(
         os.environ.get("MC_ENABLE_PARTIAL_REUSE_EXPERIMENT")
     )
+    real_decision_metadata = _compute_real_decision_metadata(input_dir)
 
     new_manifest = build_manifest(input_dir, chunk_size_bytes=chunk_size)
 
@@ -217,7 +218,6 @@ def compress_corpus_differential(
 
     if partial_reuse_experiment_enabled:
         gates_evaluated += 2
-        real_decision_metadata = _compute_real_decision_metadata(input_dir)
         if real_decision_metadata is None:
             fail_closed = True
             reason = "real_decision_metadata_unavailable"
@@ -262,7 +262,7 @@ def compress_corpus_differential(
         chunk_size,
         use_delta,
         cache_dir / _CACHE_META_FILENAME,
-        real_decision_metadata=_compute_real_decision_metadata(input_dir),
+        real_decision_metadata=real_decision_metadata,
     )
 
     report = {

@@ -216,6 +216,29 @@ def test_real_decision_metadata_used_true_when_flag_enabled(
     assert result.report["real_decision_metadata_used"] is True
 
 
+def test_real_decision_metadata_computed_once_per_run(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import metacompressor.differential.orchestrator as orch
+
+    corpus = tmp_path / "corpus"
+    cache = tmp_path / "cache"
+    _write_corpus(corpus, _SAMPLE)
+    monkeypatch.setenv("MC_ENABLE_PARTIAL_REUSE_EXPERIMENT", "1")
+    calls = {"count": 0}
+
+    def _counted_metadata(*args, **kwargs):
+        calls["count"] += 1
+        return {
+            "selected_mode": "adaptive_rc2",
+            "column_encoding_counts": {"row_template_v1": 1},
+        }
+
+    monkeypatch.setattr(orch, "_compute_real_decision_metadata", _counted_metadata)
+    compress_corpus_differential(corpus, cache)
+    assert calls["count"] == 1
+
+
 def test_noisy_gate_fail_closed(tmp_path: Path, monkeypatch) -> None:
     corpus = tmp_path / "corpus"
     cache = tmp_path / "cache"
