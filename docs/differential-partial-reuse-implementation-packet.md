@@ -137,7 +137,9 @@ Fallback must be explicit and auditable. Required reason buckets:
 - `receipt_missing_or_stale`
 - `artifact_missing`
 - `artifact_hash_mismatch`
-- `strategy_encoding_mismatch`
+- `real_decision_metadata_missing`
+- `real_decision_metadata_unavailable`
+- `strategy_encoding_real_mismatch`
 - `byte_parity_mismatch`
 - `deterministic_merge_violation`
 - `noisy_fail_closed`
@@ -179,6 +181,16 @@ Minimum required tests before merge:
 
 8. **Reporting integrity**
    - Report includes gate outcomes + fallback reason counts.
+
+## 13. Slice 1 stabilization status (current)
+
+Current implementation status for this packet:
+
+- Verification-only orchestration is in place and remains flag-gated.
+- Real compressor decision metadata is used in gates (`real_decision_metadata_used`).
+- `fresh_full_build` remains the only returned archive source.
+- Cache-return remains disabled/not implemented.
+- Wire-format remains unchanged.
 
 ## 11. Rollback plan
 

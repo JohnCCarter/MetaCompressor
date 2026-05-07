@@ -76,9 +76,10 @@ Required top-level fields for Slice 1 verification reporting:
 - `verification_mode`
 - `returned_archive_source` (must be `fresh_full_build`)
 - `byte_identical_parity_pass`
-- `strategy_encoding_match_pass`
+- `strategy_encoding_real_match_pass`
 - `deterministic_merge_pass`
 - `noisy_fail_closed_pass`
+- `real_decision_metadata_used`
 - `fallback_reason_counts`
 - `reuse_candidate_chunk_count`
 - `rebuild_candidate_chunk_count`
@@ -102,7 +103,9 @@ Slice 1 must explicitly cover and count:
 - `receipt_missing_or_stale`
 - `artifact_missing`
 - `artifact_hash_mismatch`
-- `strategy_encoding_mismatch`
+- `real_decision_metadata_missing`
+- `real_decision_metadata_unavailable`
+- `strategy_encoding_real_mismatch`
 - `byte_parity_mismatch`
 - `deterministic_merge_violation`
 - `noisy_fail_closed`
