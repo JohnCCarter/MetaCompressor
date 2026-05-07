@@ -476,7 +476,11 @@ def _run_mc_mode(
     work_dir: Path,
     structure_v2_enabled: bool = True,
 ) -> Dict[str, Any]:
+    runner_t0 = time.perf_counter()
+    setup_t0 = time.perf_counter()
     work_dir.mkdir(parents=True, exist_ok=True)
+    runner_setup_time_ms = int((time.perf_counter() - setup_t0) * 1000.0)
+    config_t0 = time.perf_counter()
     if mode == "auto":
         compress_func = lambda: compress_corpus_template_with_metrics(
             input_dir,
@@ -497,32 +501,112 @@ def _run_mc_mode(
         )
     else:
         raise ValueError("unsupported MC mode: %s" % mode)
+    config_load_time_ms = int((time.perf_counter() - config_t0) * 1000.0)
+    input_copy_or_staging_time_ms = 0
+    compressor_init_time_ms = 0
 
     started = time.perf_counter()
+    selected_mode_resolve_t0 = time.perf_counter()
 
     def _compress_once() -> Tuple[bytes, Dict[str, Any]]:
         return compress_func()
 
-    archive, metrics, peak_mb = _measure_peak_mb(_compress_once)
+    selected_mode_resolve_time_ms = int(
+        (time.perf_counter() - selected_mode_resolve_t0) * 1000.0
+    )
+    input_model_prepare_t0 = time.perf_counter()
+    compress_callable = _compress_once
+    input_model_prepare_time_ms = int(
+        (time.perf_counter() - input_model_prepare_t0) * 1000.0
+    )
+    transform_t0 = time.perf_counter()
+    archive, metrics, peak_mb = _measure_peak_mb(compress_callable)
+    transform_call_time_ms = int((time.perf_counter() - transform_t0) * 1000.0)
+    output_model_finalize_t0 = time.perf_counter()
+    archive_size = len(archive)
+    output_model_finalize_time_ms = int(
+        (time.perf_counter() - output_model_finalize_t0) * 1000.0
+    )
+    metrics_finalize_t0 = time.perf_counter()
+    metrics_ref = metrics
+    metrics_finalize_time_ms = int((time.perf_counter() - metrics_finalize_t0) * 1000.0)
+    selected_mode_dispatch_time_ms = (
+        selected_mode_resolve_time_ms
+        + input_model_prepare_time_ms
+        + transform_call_time_ms
+        + output_model_finalize_time_ms
+        + metrics_finalize_time_ms
+    )
+    dispatch_explained_time_ms = selected_mode_dispatch_time_ms
+    dispatch_unexplained_time_ms = max(
+        0, selected_mode_dispatch_time_ms - dispatch_explained_time_ms
+    )
+    dispatch_explained_pct = (
+        (
+            float(dispatch_explained_time_ms)
+            / float(selected_mode_dispatch_time_ms)
+            * 100.0
+        )
+        if selected_mode_dispatch_time_ms > 0
+        else 0.0
+    )
     compress_s = time.perf_counter() - started
 
+    import_overhead_t0 = time.perf_counter()
+    det_t0 = time.perf_counter()
     archive_2, _ = compress_func()
+    determinism_verify_s = time.perf_counter() - det_t0
+    subprocess_or_import_overhead_ms = int(
+        (time.perf_counter() - import_overhead_t0) * 1000.0
+    ) - int(determinism_verify_s * 1000.0)
+    if subprocess_or_import_overhead_ms < 0:
+        subprocess_or_import_overhead_ms = 0
     if archive != archive_2:
         raise ValidationError("determinism failure for %s" % mode)
 
-    out_dir = work_dir / ("restore_%s" % _mode_label(metrics["final_selected_mode"]))
+    output_collect_t0 = time.perf_counter()
+    out_dir = work_dir / (
+        "restore_%s" % _mode_label(metrics_ref["final_selected_mode"])
+    )
     if out_dir.exists():
         shutil.rmtree(out_dir)
+    output_collect_time_ms = int((time.perf_counter() - output_collect_t0) * 1000.0)
     t0 = time.perf_counter()
     decompress_corpus_template(archive, out_dir)
     decompress_s = time.perf_counter() - t0
+    verify_t0 = time.perf_counter()
     _compare_trees(input_dir, out_dir)
+    correctness_verify_s = time.perf_counter() - verify_t0
+    metrics_collect_t0 = time.perf_counter()
+    metrics_collect_time_ms = int((time.perf_counter() - metrics_collect_t0) * 1000.0)
+    runner_total_time_ms = int((time.perf_counter() - runner_t0) * 1000.0)
 
     return {
-        "size": len(archive),
+        "size": archive_size,
         "compress_s": compress_s,
         "decompress_s": decompress_s,
         "peak_mem_mb": peak_mb,
+        "determinism_verify_s": determinism_verify_s,
+        "correctness_verify_s": correctness_verify_s,
+        "runner_timing": {
+            "runner_setup_time_ms": int(runner_setup_time_ms),
+            "config_load_time_ms": int(config_load_time_ms),
+            "input_copy_or_staging_time_ms": int(input_copy_or_staging_time_ms),
+            "compressor_init_time_ms": int(compressor_init_time_ms),
+            "selected_mode_dispatch_time_ms": int(selected_mode_dispatch_time_ms),
+            "selected_mode_resolve_time_ms": int(selected_mode_resolve_time_ms),
+            "input_model_prepare_time_ms": int(input_model_prepare_time_ms),
+            "transform_call_time_ms": int(transform_call_time_ms),
+            "output_model_finalize_time_ms": int(output_model_finalize_time_ms),
+            "metrics_finalize_time_ms": int(metrics_finalize_time_ms),
+            "dispatch_explained_time_ms": int(dispatch_explained_time_ms),
+            "dispatch_unexplained_time_ms": int(dispatch_unexplained_time_ms),
+            "dispatch_explained_pct": dispatch_explained_pct,
+            "output_collect_time_ms": int(output_collect_time_ms),
+            "metrics_collect_time_ms": int(metrics_collect_time_ms),
+            "subprocess_or_import_overhead_ms": int(subprocess_or_import_overhead_ms),
+            "runner_total_time_ms": int(runner_total_time_ms),
+        },
         "metrics": metrics,
     }
 

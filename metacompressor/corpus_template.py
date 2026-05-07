@@ -319,6 +319,14 @@ _COMBINED_VAR_RE = re.compile(
     )
 )
 
+_PROFILE_REGEX_APPLY_TIME_S = 0.0
+_PROFILE_REGEX_APPLY_COUNT = 0
+_PROFILE_TEMPLATE_EXTRACT_CALL_COUNT = 0
+
+_MAX_FILES_INLINE_TEMPLATE_EXTRACT_DEFAULT = 8
+_MAX_BYTES_INLINE_TEMPLATE_EXTRACT_DEFAULT = 512 * 1024
+_MAX_LINES_INLINE_TEMPLATE_EXTRACT_DEFAULT = 5000
+
 
 def _tokenize_legacy(line: str) -> Tuple[Tuple[str, ...], List[str]]:
     """Return the legacy structure-extraction split for *line*."""
@@ -558,6 +566,8 @@ def _find_next_variable_legacy(line: str, start: int) -> Optional[Tuple[int, int
 
 
 def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]:
+    global _PROFILE_REGEX_APPLY_TIME_S, _PROFILE_REGEX_APPLY_COUNT
+    t_apply_start = time.perf_counter()
     best: Optional[Tuple[int, int, str]] = None
 
     key_match = _KEY_VALUE_RE.search(line, start)
@@ -582,6 +592,8 @@ def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]
         ):
             best = candidate
 
+    _PROFILE_REGEX_APPLY_TIME_S += time.perf_counter() - t_apply_start
+    _PROFILE_REGEX_APPLY_COUNT += 1
     return best
 
 
@@ -632,6 +644,8 @@ def _scan_text_line_native(line: str) -> _LineAnalysis:
 
 def _analyze_line(line: str) -> _LineAnalysis:
     """Return structure-v2 analysis for *line*."""
+    global _PROFILE_TEMPLATE_EXTRACT_CALL_COUNT
+    _PROFILE_TEMPLATE_EXTRACT_CALL_COUNT += 1
     json_analysis = _analyze_json_line(line)
     if json_analysis is not None:
         return json_analysis
@@ -674,6 +688,9 @@ def _tokenize_one_file(
     compute_legacy_metrics: bool,
 ) -> tuple:
     """Tokenise a single file and return the per-file state for merging."""
+    global _PROFILE_REGEX_APPLY_TIME_S, _PROFILE_REGEX_APPLY_COUNT
+    global _PROFILE_TEMPLATE_EXTRACT_CALL_COUNT
+    t_worker_start = time.perf_counter()
     legacy_needed = compute_legacy_metrics or not structure_v2_enabled
 
     file_legacy_tpl_count: Dict[Tuple[str, ...], int] = {}
@@ -687,12 +704,37 @@ def _tokenize_one_file(
     line_intern: Dict[str, str] = {}
     local_tok_cache: Dict[str, _LineAnalysis] = {}
     local_legacy_tok_cache: Dict[str, Tuple[Tuple[str, ...], List[str]]] = {}
+    line_split_s = 0.0
+    tokenization_s = 0.0
+    pattern_match_s = 0.0
+    placeholder_detection_s = 0.0
+    template_hash_s = 0.0
+    template_grouping_s = 0.0
+    template_cache_lookup_s = 0.0
+    lines_scanned = 0
+    tokens_scanned = 0
+    regex_match_count = 0
+    templates_created = 0
+    template_cache_hits = 0
+    template_cache_misses = 0
+    template_extract_call_count = 0
+    tokenize_one_file_call_count = 1
+    regex_apply_time_s = 0.0
+    regex_apply_count_local = 0
+    first_line_seen = False
+    worker_startup_s = 0.0
 
     try:
         for raw_line in _iter_text_lines(file_path):
+            if not first_line_seen:
+                worker_startup_s = time.perf_counter() - t_worker_start
+                first_line_seen = True
+            lines_scanned += 1
+            t_split_start = time.perf_counter()
             line = line_intern.setdefault(raw_line, raw_line)
             cached_lines.append(line)
             file_total_lines += 1
+            line_split_s += time.perf_counter() - t_split_start
             if legacy_needed:
                 if line not in local_legacy_tok_cache:
                     local_legacy_tok_cache[line] = _tokenize_legacy(line)
@@ -701,8 +743,18 @@ def _tokenize_one_file(
                     file_legacy_tpl_count.get(legacy_tkey, 0) + 1
                 )
 
-            if line not in local_tok_cache:
-                local_tok_cache[line] = (
+            t_cache_lookup_start = time.perf_counter()
+            cache_hit = line in local_tok_cache
+            template_cache_lookup_s += time.perf_counter() - t_cache_lookup_start
+            if cache_hit:
+                template_cache_hits += 1
+            else:
+                template_cache_misses += 1
+                regex_apply_before = _PROFILE_REGEX_APPLY_TIME_S
+                regex_count_before = _PROFILE_REGEX_APPLY_COUNT
+                call_before = _PROFILE_TEMPLATE_EXTRACT_CALL_COUNT
+                t_tokenize_start = time.perf_counter()
+                new_analysis = (
                     _analyze_line(line)
                     if structure_v2_enabled
                     else _LineAnalysis(
@@ -720,9 +772,34 @@ def _tokenize_one_file(
                         json_structure_key=(),
                     )
                 )
+                tokenize_elapsed = time.perf_counter() - t_tokenize_start
+                regex_apply_delta = max(
+                    0.0, _PROFILE_REGEX_APPLY_TIME_S - regex_apply_before
+                )
+                regex_count_delta = max(
+                    0, _PROFILE_REGEX_APPLY_COUNT - regex_count_before
+                )
+                call_delta = max(0, _PROFILE_TEMPLATE_EXTRACT_CALL_COUNT - call_before)
+                regex_apply_time_s += regex_apply_delta
+                regex_apply_count_local += regex_count_delta
+                template_extract_call_count += call_delta
+                pattern_match_s += regex_apply_delta
+                tokenization_s += max(0.0, tokenize_elapsed - regex_apply_delta)
+                local_tok_cache[line] = new_analysis
+                templates_created += 1
+                analysis_new = local_tok_cache[line]
+                t_placeholder_start = time.perf_counter()
+                value_count = len(analysis_new.values)
+                tokens_scanned += value_count
+                regex_match_count += value_count
+                _ = analysis_new.template_parts
+                placeholder_detection_s += time.perf_counter() - t_placeholder_start
             analysis = local_tok_cache[line]
+            t_hash_start = time.perf_counter()
             tkey = analysis.template_parts
             file_tpl_count[tkey] = file_tpl_count.get(tkey, 0) + 1
+            template_hash_s += time.perf_counter() - t_hash_start
+            t_group_start = time.perf_counter()
             file_normalized_tpl_count[analysis.normalized_skeleton] = (
                 file_normalized_tpl_count.get(analysis.normalized_skeleton, 0) + 1
             )
@@ -731,6 +808,7 @@ def _tokenize_one_file(
                 file_json_template_keys[analysis.json_structure_key] = (
                     file_json_template_keys.get(analysis.json_structure_key, 0) + 1
                 )
+            template_grouping_s += time.perf_counter() - t_group_start
         return (
             rel,
             False,
@@ -743,9 +821,76 @@ def _tokenize_one_file(
             file_json_template_keys,
             file_total_lines,
             file_json_lines,
+            {
+                "line_split_time_ms": int(line_split_s * 1000.0),
+                "tokenization_time_ms": int(tokenization_s * 1000.0),
+                "pattern_match_time_ms": int(pattern_match_s * 1000.0),
+                "placeholder_detection_time_ms": int(placeholder_detection_s * 1000.0),
+                "template_hash_time_ms": int(template_hash_s * 1000.0),
+                "template_grouping_time_ms": int(template_grouping_s * 1000.0),
+                "template_cache_lookup_time_ms": int(template_cache_lookup_s * 1000.0),
+                "lines_scanned": int(lines_scanned),
+                "tokens_scanned": int(tokens_scanned),
+                "regex_match_count": int(regex_match_count),
+                "templates_created": int(templates_created),
+                "template_cache_hits": int(template_cache_hits),
+                "template_cache_misses": int(template_cache_misses),
+                "template_extract_call_count": int(template_extract_call_count),
+                "tokenize_one_file_call_count": int(tokenize_one_file_call_count),
+                "regex_compile_time_ms": 0,
+                "regex_apply_time_ms": int(regex_apply_time_s * 1000.0),
+                "worker_startup_time_ms": int(worker_startup_s * 1000.0),
+                "per_call_overhead_time_ms": int(
+                    max(
+                        0.0,
+                        (line_split_s + tokenization_s + placeholder_detection_s)
+                        / max(1, template_extract_call_count),
+                    )
+                    * 1000.0
+                ),
+                "regex_apply_count": int(regex_apply_count_local),
+                "timing_anomaly": bool(
+                    lines_scanned <= 1 and (tokenization_s * 1000.0) > 50.0
+                ),
+            },
         )
     except UnicodeDecodeError:
-        return (rel, True, None, {}, None, {}, {}, {}, {}, 0, 0)
+        return (
+            rel,
+            True,
+            None,
+            {},
+            None,
+            {},
+            {},
+            {},
+            {},
+            0,
+            0,
+            {
+                "line_split_time_ms": 0,
+                "tokenization_time_ms": 0,
+                "pattern_match_time_ms": 0,
+                "placeholder_detection_time_ms": 0,
+                "template_hash_time_ms": 0,
+                "template_grouping_time_ms": 0,
+                "template_cache_lookup_time_ms": 0,
+                "lines_scanned": 0,
+                "tokens_scanned": 0,
+                "regex_match_count": 0,
+                "templates_created": 0,
+                "template_cache_hits": 0,
+                "template_cache_misses": 0,
+                "template_extract_call_count": 0,
+                "tokenize_one_file_call_count": 1,
+                "regex_compile_time_ms": 0,
+                "regex_apply_time_ms": 0,
+                "worker_startup_time_ms": 0,
+                "per_call_overhead_time_ms": 0,
+                "regex_apply_count": 0,
+                "timing_anomaly": False,
+            },
+        )
 
 
 def _tokenize_one_file_unpack(args) -> tuple:
@@ -788,6 +933,7 @@ def _tokenize_result_to_payload(result: tuple) -> bytes:
         file_json_template_keys,
         file_total_lines,
         file_json_lines,
+        template_extract_stats,
     ) = result
     payload = {
         "rel": rel,
@@ -817,6 +963,7 @@ def _tokenize_result_to_payload(result: tuple) -> bytes:
         ],
         "file_total_lines": int(file_total_lines),
         "file_json_lines": int(file_json_lines),
+        "template_extract_stats": dict(template_extract_stats),
     }
     return msgpack.packb(payload, use_bin_type=True)
 
@@ -845,6 +992,7 @@ def _tokenize_payload_to_result(payload: bytes) -> tuple:
         {tuple(k): int(v) for k, v in data["json_template_keys"]},
         int(data["file_total_lines"]),
         int(data["file_json_lines"]),
+        dict(data.get("template_extract_stats", {})),
     )
 
 
@@ -855,6 +1003,7 @@ def _tokenize_one_file_shared_unpack(args) -> tuple:
     shared memory, and returns only ``("__shm__", name, size)`` to avoid large
     pickle payloads over process boundaries.
     """
+    t_pack_start = time.perf_counter()
     result = _tokenize_one_file(*args)
     try:
         payload = _tokenize_result_to_payload(result)
@@ -870,7 +1019,12 @@ def _tokenize_one_file_shared_unpack(args) -> tuple:
             except Exception:
                 # Best-effort only; fallback path below preserves correctness.
                 pass
-            return ("__shm__", shm.name, len(payload))
+            return (
+                "__shm__",
+                shm.name,
+                len(payload),
+                int((time.perf_counter() - t_pack_start) * 1000.0),
+            )
         finally:
             # On Windows, closing the creator handle may destroy the segment
             # before the parent opens it; let worker process teardown reclaim it.
@@ -909,6 +1063,27 @@ def _decide_tokenize_workers(num_files: int, total_bytes: int) -> int:
         return 1
     cpus = os.cpu_count() or 1
     return min(cpus, num_files, 8)
+
+
+def _fast_count_lines_for_inline(files: List[Path], max_lines: int) -> int:
+    """Fast newline count used only for inline fast-path gating."""
+    if max_lines <= 0:
+        return 0
+    counted = 0
+    for path in files:
+        try:
+            with path.open("rb") as fh:
+                while counted <= max_lines:
+                    chunk = fh.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    counted += chunk.count(b"\n")
+                    if counted > max_lines:
+                        return counted
+        except OSError:
+            # Fail closed: treat as large.
+            return max_lines + 1
+    return counted
 
 
 def _template_string(text_parts: Tuple[str, ...]) -> str:
@@ -967,7 +1142,9 @@ def _pack_archive_payload(payload: dict, level: int = _ZSTD_LEVEL_STRUCTURED) ->
     )
 
 
-def _build_tarzstd_bytes(input_dir: Path, all_files: List[Path]) -> bytes:
+def _build_tarzstd_bytes(
+    input_dir: Path, all_files: List[Path], file_sizes: Optional[Dict[Path, int]] = None
+) -> bytes:
     """Return a TAR+ZSTD baseline archive for *all_files*."""
     output = io.BytesIO()
     with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
@@ -976,7 +1153,10 @@ def _build_tarzstd_bytes(input_dir: Path, all_files: List[Path]) -> bytes:
         with tarfile.open(fileobj=compressor, mode="w|") as tar:
             for file_path in all_files:
                 info = tarfile.TarInfo(name=file_path.relative_to(input_dir).as_posix())
-                info.size = file_path.stat().st_size
+                if file_sizes is None:
+                    info.size = file_path.stat().st_size
+                else:
+                    info.size = file_sizes[file_path]
                 info.mtime = 0
                 info.uid = 0
                 info.gid = 0
@@ -1003,7 +1183,9 @@ class _CountingWriter:
         return None
 
 
-def _measure_tarzstd_size(input_dir: Path, all_files: List[Path]) -> int:
+def _measure_tarzstd_size(
+    input_dir: Path, all_files: List[Path], file_sizes: Optional[Dict[Path, int]] = None
+) -> int:
     """Return TAR+ZSTD baseline size without materializing output bytes."""
     sink = _CountingWriter()
     with zstd.ZstdCompressor(level=_ZSTD_LEVEL).stream_writer(
@@ -1012,7 +1194,10 @@ def _measure_tarzstd_size(input_dir: Path, all_files: List[Path]) -> int:
         with tarfile.open(fileobj=compressor, mode="w|") as tar:
             for file_path in all_files:
                 info = tarfile.TarInfo(name=file_path.relative_to(input_dir).as_posix())
-                info.size = file_path.stat().st_size
+                if file_sizes is None:
+                    info.size = file_path.stat().st_size
+                else:
+                    info.size = file_sizes[file_path]
                 info.mtime = 0
                 info.uid = 0
                 info.gid = 0
@@ -1816,6 +2001,7 @@ def compress_corpus_template_with_metrics(
     if not input_dir.is_dir():
         raise ValueError(f"Not a directory: {input_dir}")
 
+    t_source_read_start = time.perf_counter()
     all_files = sorted(p for p in input_dir.rglob("*") if p.is_file())
 
     # -----------------------------------------------------------------------
@@ -1859,6 +2045,8 @@ def compress_corpus_template_with_metrics(
     json_template_keys: Dict[Tuple[str, ...], int] = {}
 
     t_tokenize_start = time.perf_counter()
+    file_sizes = {p: p.stat().st_size for p in all_files}
+    t_source_read_s = time.perf_counter() - t_source_read_start
     work_items = [
         (
             file_path,
@@ -1868,15 +2056,101 @@ def compress_corpus_template_with_metrics(
         )
         for file_path in all_files
     ]
-    total_corpus_bytes = sum(p.stat().st_size for p in all_files)
+    total_corpus_bytes = sum(file_sizes.values())
+    max_files_for_inline_template_extract = int(
+        os.environ.get(
+            "MC_MAX_FILES_INLINE_TEMPLATE_EXTRACT",
+            str(_MAX_FILES_INLINE_TEMPLATE_EXTRACT_DEFAULT),
+        ).strip()
+        or _MAX_FILES_INLINE_TEMPLATE_EXTRACT_DEFAULT
+    )
+    max_bytes_for_inline_template_extract = int(
+        os.environ.get(
+            "MC_MAX_BYTES_INLINE_TEMPLATE_EXTRACT",
+            str(_MAX_BYTES_INLINE_TEMPLATE_EXTRACT_DEFAULT),
+        ).strip()
+        or _MAX_BYTES_INLINE_TEMPLATE_EXTRACT_DEFAULT
+    )
+    max_lines_for_inline_template_extract = int(
+        os.environ.get(
+            "MC_MAX_LINES_INLINE_TEMPLATE_EXTRACT",
+            str(_MAX_LINES_INLINE_TEMPLATE_EXTRACT_DEFAULT),
+        ).strip()
+        or _MAX_LINES_INLINE_TEMPLATE_EXTRACT_DEFAULT
+    )
+    inline_template_extract_used = False
+    inline_template_extract_reason = ""
+    inline_template_extract_time_ms = 0
+
+    inline_disabled = os.environ.get(
+        "MC_DISABLE_INLINE_TEMPLATE_EXTRACT", ""
+    ).strip() in (
+        "1",
+        "true",
+        "True",
+    )
+    inline_candidate = (
+        (not inline_disabled)
+        and len(all_files) <= max_files_for_inline_template_extract
+        and total_corpus_bytes <= max_bytes_for_inline_template_extract
+    )
+    if inline_candidate:
+        counted_lines = _fast_count_lines_for_inline(
+            all_files, max_lines_for_inline_template_extract
+        )
+        if counted_lines <= max_lines_for_inline_template_extract:
+            inline_template_extract_used = True
+            inline_template_extract_reason = "below_inline_thresholds"
+        else:
+            inline_template_extract_reason = "line_count_above_threshold"
+    else:
+        inline_template_extract_reason = (
+            "disabled" if inline_disabled else "files_or_bytes_above_threshold"
+        )
     n_workers = _decide_tokenize_workers(len(all_files), total_corpus_bytes)
     use_shared_pass1 = False
     shared_payload_bytes = 0
     shared_results_count = 0
     t_shared_unpack_s = 0.0
     shared_open_failures = 0
+    shared_pack_time_ms = 0
+    template_extract_substeps_ms = {
+        "line_split_time_ms": 0,
+        "tokenization_time_ms": 0,
+        "pattern_match_time_ms": 0,
+        "placeholder_detection_time_ms": 0,
+        "template_hash_time_ms": 0,
+        "template_grouping_time_ms": 0,
+        "template_cache_lookup_time_ms": 0,
+    }
+    template_extract_counters = {
+        "lines_scanned": 0,
+        "tokens_scanned": 0,
+        "regex_match_count": 0,
+        "templates_created": 0,
+        "template_cache_hits": 0,
+        "template_cache_misses": 0,
+        "template_extract_call_count": 0,
+        "tokenize_one_file_call_count": 0,
+        "regex_compile_time_ms": 0,
+        "regex_apply_time_ms": 0,
+        "worker_startup_time_ms": 0,
+        "per_call_overhead_time_ms": 0,
+        "regex_apply_count": 0,
+        "timing_anomaly_count": 0,
+    }
 
-    if n_workers > 1:
+    if inline_template_extract_used:
+        t_inline_start = time.perf_counter()
+        results = []
+        for item in work_items:
+            results.append(_tokenize_one_file(*item))
+        inline_template_extract_time_ms = int(
+            (time.perf_counter() - t_inline_start) * 1000.0
+        )
+        n_workers = 1
+        use_shared_pass1 = False
+    elif n_workers > 1:
         # Parallel pass 1.  Each worker tokenises its files independently
         # using its own line_intern + local_tok_cache; the master re-interns
         # and merges below so cross-worker line repetition is dedup'd at
@@ -1895,9 +2169,13 @@ def compress_corpus_template_with_metrics(
     else:
         results = [_tokenize_one_file(*item) for item in work_items]
 
+    t_chunk_dedupe_start = time.perf_counter()
+    t_file_record_build_start = time.perf_counter()
     for idx, result in enumerate(results):
-        if isinstance(result, tuple) and len(result) == 3 and result[0] == "__shm__":
-            _, shm_name, payload_size = result
+        if isinstance(result, tuple) and len(result) >= 3 and result[0] == "__shm__":
+            _, shm_name, payload_size = result[:3]
+            if len(result) >= 4:
+                shared_pack_time_ms += int(result[3])
             shared_results_count += 1
             shared_payload_bytes += int(payload_size)
             t_unpack_start = time.perf_counter()
@@ -1925,6 +2203,7 @@ def compress_corpus_template_with_metrics(
             file_json_template_keys,
             file_total_lines,
             file_json_lines,
+            file_template_extract_stats,
         ) = result
         if is_binary:
             file_meta.append((rel, True, None))
@@ -1954,13 +2233,26 @@ def compress_corpus_template_with_metrics(
             )
         for json_key, count in file_json_template_keys.items():
             json_template_keys[json_key] = json_template_keys.get(json_key, 0) + count
+        for key in template_extract_substeps_ms:
+            template_extract_substeps_ms[key] += int(
+                file_template_extract_stats.get(key, 0)
+            )
+        for key in template_extract_counters:
+            template_extract_counters[key] += int(
+                file_template_extract_stats.get(key, 0)
+            )
+        if bool(file_template_extract_stats.get("timing_anomaly", False)):
+            template_extract_counters["timing_anomaly_count"] += 1
 
+    t_file_record_build_s = time.perf_counter() - t_file_record_build_start
+    t_chunk_dedupe_s = time.perf_counter() - t_chunk_dedupe_start
     t_tokenize_s = time.perf_counter() - t_tokenize_start
     t_count_s = 0.0  # tokenise and count are combined in a single pass above
 
     # -----------------------------------------------------------------------
     # Build shared template dictionary
     # -----------------------------------------------------------------------
+    t_tpl_norm_start = time.perf_counter()
     tpl_to_id: Dict[Tuple[str, ...], int] = {}
     tpl_strings: List[str] = []
     for tkey, cnt in tpl_count.items():
@@ -1979,6 +2271,7 @@ def compress_corpus_template_with_metrics(
         for template_group in normalized_groups.values()
         if len(template_group) > 1
     )
+    t_tpl_norm_s = time.perf_counter() - t_tpl_norm_start
 
     admissibility_pruned_row = (
         total_lines >= _ADMISSIBILITY_MIN_LARGE_LINES
@@ -2002,6 +2295,7 @@ def compress_corpus_template_with_metrics(
         "low_structure_fallback_files": 0,
         "total_var_slots": 0,
     }
+    t_row_group_start = time.perf_counter()
     if not admissibility_pruned_row:
         row_result, row_stats = _build_row_template_archive(
             input_dir=input_dir,
@@ -2011,6 +2305,8 @@ def compress_corpus_template_with_metrics(
             tpl_to_id=tpl_to_id,
             tpl_strings=tpl_strings,
         )
+    t_row_group_s = time.perf_counter() - t_row_group_start
+    t_columnar_detect_start = time.perf_counter()
     columnar_result, columnar_stats = _build_columnar_template_archive(
         all_files=all_files,
         file_meta=file_meta,
@@ -2018,8 +2314,10 @@ def compress_corpus_template_with_metrics(
         tpl_to_id=tpl_to_id,
         tpl_strings=tpl_strings,
     )
+    t_columnar_detect_s = time.perf_counter() - t_columnar_detect_start
 
     t_encode_s = row_stats["encode_s"] + columnar_stats["encode_s"]
+    t_payload_assembly_s = t_encode_s
     t_serialize_s = row_stats["serialize_s"] + columnar_stats["serialize_s"]
     t_zstd_s = 0.0
     t_extract_s = time.perf_counter() - t_extract_start
@@ -2032,7 +2330,7 @@ def compress_corpus_template_with_metrics(
     # re-encode as raw_tar_zstd mode so the caller never receives an archive
     # worse than TAR+ZSTD by more than a few dozen bytes of MCK overhead.
     # -----------------------------------------------------------------------
-    tarzstd_size = _measure_tarzstd_size(input_dir, all_files)
+    tarzstd_size = _measure_tarzstd_size(input_dir, all_files, file_sizes=file_sizes)
 
     row_mode_size = len(row_result) if row_result is not None else len(columnar_result)
     columnar_size = len(columnar_result)
@@ -2047,7 +2345,9 @@ def compress_corpus_template_with_metrics(
         best_template_mode = _MODE_ROW_V1
 
     if len(best_template_result) > tarzstd_size * _CORPUS_FALLBACK_THRESHOLD:
-        tarzstd_bytes = _build_tarzstd_bytes(input_dir, all_files)
+        tarzstd_bytes = _build_tarzstd_bytes(
+            input_dir, all_files, file_sizes=file_sizes
+        )
         result = _build_raw_tarzstd_archive(tarzstd_bytes)
         final_selected_mode = _MODE_RAW_TAR_ZSTD
         chose_raw_fallback = True
@@ -2064,6 +2364,65 @@ def compress_corpus_template_with_metrics(
         else:
             fallback_reason_counts = dict(row_stats["fallback_reason_counts"])
     t_total_s = time.perf_counter() - t_total_start
+    transform_substeps_ms = {
+        "source_read_time_ms": int(t_source_read_s * 1000.0),
+        "file_record_build_time_ms": int(t_file_record_build_s * 1000.0),
+        "template_extract_time_ms": int(t_tokenize_s * 1000.0),
+        "normalization_apply_time_ms": int(t_tpl_norm_s * 1000.0),
+        "row_model_build_time_ms": int(t_row_group_s * 1000.0),
+        "dedupe_index_build_time_ms": int(t_chunk_dedupe_s * 1000.0),
+        "payload_assembly_time_ms": int(t_payload_assembly_s * 1000.0),
+        "final_pack_time_ms": int(t_serialize_s * 1000.0),
+        "final_zstd_time_ms": int(t_zstd_s * 1000.0),
+    }
+    transform_total_time_ms = int(t_total_s * 1000.0)
+    transform_explained_time_ms = min(
+        transform_total_time_ms, int(sum(transform_substeps_ms.values()))
+    )
+    transform_unexplained_time_ms = max(
+        0, transform_total_time_ms - transform_explained_time_ms
+    )
+    transform_explained_pct = (
+        (float(transform_explained_time_ms) / float(transform_total_time_ms) * 100.0)
+        if transform_total_time_ms > 0
+        else 0.0
+    )
+    template_extract_time_ms_total = int(t_tokenize_s * 1000.0)
+    template_extract_exclusive_sum_ms = int(
+        template_extract_substeps_ms["line_split_time_ms"]
+        + template_extract_substeps_ms["tokenization_time_ms"]
+        + template_extract_substeps_ms["pattern_match_time_ms"]
+        + template_extract_substeps_ms["placeholder_detection_time_ms"]
+        + template_extract_substeps_ms["template_hash_time_ms"]
+        + template_extract_substeps_ms["template_grouping_time_ms"]
+        + template_extract_substeps_ms["template_cache_lookup_time_ms"]
+    )
+    tokenization_pattern_double_count = bool(
+        template_extract_substeps_ms["tokenization_time_ms"]
+        + template_extract_substeps_ms["pattern_match_time_ms"]
+        > template_extract_time_ms_total + 2
+    )
+    template_extract_timing_anomaly = bool(
+        int(template_extract_counters.get("lines_scanned", 0)) <= 1
+        and template_extract_time_ms_total > 50
+    )
+    template_extract_wall_time_ms = int(template_extract_time_ms_total)
+    template_extract_child_work_time_ms = int(template_extract_exclusive_sum_ms)
+    template_extract_parent_wait_time_ms = 0
+    template_extract_queue_submit_time_ms = 0
+    template_extract_result_collect_time_ms = 0
+    template_extract_unexplained_time_ms = max(
+        0,
+        template_extract_wall_time_ms
+        - template_extract_child_work_time_ms
+        - template_extract_parent_wait_time_ms
+        - template_extract_queue_submit_time_ms
+        - template_extract_result_collect_time_ms
+        - int(shared_pack_time_ms)
+        - int(t_shared_unpack_s * 1000.0)
+        - int(template_extract_counters.get("worker_startup_time_ms", 0)),
+    )
+    template_extract_saved_estimate_ms = int(template_extract_unexplained_time_ms)
 
     template_reuse_count = row_stats["template_reuse_count"]
     raw_fallback_lines = row_stats["raw_fallback_lines"]
@@ -2146,6 +2505,91 @@ def compress_corpus_template_with_metrics(
             "shared_results_count": shared_results_count,
             "shared_payload_bytes": shared_payload_bytes,
             "shared_open_failures": shared_open_failures,
+            "selected_build_substeps_ms": {
+                "input_walk_time_ms": int(t_source_read_s * 1000.0),
+                "template_normalization_time_ms": int(t_tpl_norm_s * 1000.0),
+                "row_grouping_time_ms": int(t_row_group_s * 1000.0),
+                "columnar_detection_time_ms": int(t_columnar_detect_s * 1000.0),
+                "chunk_dedupe_time_ms": int(t_chunk_dedupe_s * 1000.0),
+                "delta_reuse_time_ms": 0,
+                "msgpack_object_build_time_ms": int(t_serialize_s * 1000.0),
+                "memory_copy_materialization_time_ms": int(t_shared_unpack_s * 1000.0),
+            },
+            "transform_call_substeps_ms": transform_substeps_ms,
+            "transform_explained_time_ms": int(transform_explained_time_ms),
+            "transform_unexplained_time_ms": int(transform_unexplained_time_ms),
+            "transform_explained_pct": transform_explained_pct,
+            "template_extract_substeps_ms": template_extract_substeps_ms,
+            "template_extract_counters": template_extract_counters,
+            "shared_memory_pack_time_ms": int(shared_pack_time_ms),
+            "shared_memory_unpack_time_ms": int(t_shared_unpack_s * 1000.0),
+            "template_extract_validation": {
+                "template_extract_call_count": int(
+                    template_extract_counters.get("template_extract_call_count", 0)
+                ),
+                "tokenize_one_file_call_count": int(
+                    template_extract_counters.get("tokenize_one_file_call_count", 0)
+                ),
+                "regex_compile_time_ms": int(
+                    template_extract_counters.get("regex_compile_time_ms", 0)
+                ),
+                "regex_apply_time_ms": int(
+                    template_extract_counters.get("regex_apply_time_ms", 0)
+                ),
+                "worker_startup_time_ms": int(
+                    template_extract_counters.get("worker_startup_time_ms", 0)
+                ),
+                "per_call_overhead_time_ms": int(
+                    template_extract_counters.get("per_call_overhead_time_ms", 0)
+                ),
+                "template_extract_exclusive_sum_ms": int(
+                    template_extract_exclusive_sum_ms
+                ),
+                "template_extract_time_ms": int(template_extract_time_ms_total),
+                "tokenization_pattern_double_count": tokenization_pattern_double_count,
+                "timing_anomaly": template_extract_timing_anomaly,
+                "template_extract_wall_time_ms": int(template_extract_wall_time_ms),
+                "template_extract_child_work_time_ms": int(
+                    template_extract_child_work_time_ms
+                ),
+                "template_extract_parent_wait_time_ms": int(
+                    template_extract_parent_wait_time_ms
+                ),
+                "template_extract_queue_submit_time_ms": int(
+                    template_extract_queue_submit_time_ms
+                ),
+                "template_extract_result_collect_time_ms": int(
+                    template_extract_result_collect_time_ms
+                ),
+                "template_extract_unexplained_time_ms": int(
+                    template_extract_unexplained_time_ms
+                ),
+                "inline_template_extract_used": bool(inline_template_extract_used),
+                "inline_template_extract_reason": inline_template_extract_reason,
+                "inline_template_extract_time_ms": int(inline_template_extract_time_ms),
+                "template_extract_saved_estimate_ms": int(
+                    template_extract_saved_estimate_ms
+                ),
+                "inline_thresholds": {
+                    "max_files_for_inline_template_extract": int(
+                        max_files_for_inline_template_extract
+                    ),
+                    "max_bytes_for_inline_template_extract": int(
+                        max_bytes_for_inline_template_extract
+                    ),
+                    "max_lines_for_inline_template_extract": int(
+                        max_lines_for_inline_template_extract
+                    ),
+                },
+            },
+            "selected_build_counters": {
+                "files_processed": int(len(all_files)),
+                "chunks_processed": int(len(work_items)),
+                "rows_processed_estimate": int(total_lines),
+                "templates_detected": int(len(tpl_count)),
+                "dedupe_hits": int(max(0, total_lines - len(tok_cache))),
+                "intermediate_bytes_built": int(shared_payload_bytes),
+            },
         },
         "shared_pass1": {
             "enabled": bool(use_shared_pass1 and n_workers > 1),

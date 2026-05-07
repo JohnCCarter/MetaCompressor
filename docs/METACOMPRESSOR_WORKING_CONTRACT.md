@@ -1,6 +1,6 @@
 # MetaCompressor — working contract
 
-Last update: 2026-05-04
+Last update: 2026-05-07
 Status: active
 
 ## What this is
@@ -55,6 +55,7 @@ If **`Last update`** at the top of this file moved, treat the contract as **touc
 
 | Date | Change |
 |------|--------|
+| 2026-05-07 | Added active working focus: quick-mode advisory instrumentation (`MCReceipt`, differential sidecars, analysis-skip gating, and timing decomposition) is reporting-first and must not change compression behavior, wire format, or candidate selection without explicit approval/ADR. |
 | 2026-05-04 | Initial working contract: pointers to `AGENTS.md`, layout policy, ADR, CI, pre-commit, skills charter. |
 
 When you change governance, CI, or layout rules, add a **one-line row** here in the same PR.
