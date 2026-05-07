@@ -4,31 +4,39 @@
   "fallback_reason_counts": {
     "noisy_fail_closed": 20
   },
-  "generated_at": "2026-05-07T15:13:14Z",
+  "generated_at": "2026-05-07T16:08:11Z",
   "noisy_fail_closed_status": "pass",
   "real_decision_metadata_used": true,
   "returned_archive_source": "fresh_full_build",
   "run_count": 20,
-  "simulation_only": true,
+  "runtime_experimental": true,
+  "runtime_substitution_fail_reason_counts": {
+    "byte_parity_mismatch": 30
+  },
+  "runtime_substitution_used_rate": 0.45,
+  "simulation_only": false,
   "strategy_encoding_match_rate": 1.0,
-  "verification_mode": "partial_reuse_simulation",
+  "verification_mode": "partial_reuse_runtime_experimental",
   "workloads": [
     {
       "byte_identical_parity_rate": 1.0,
       "returned_archive_source": "fresh_full_build",
       "run_count": 20,
+      "runtime_substitution_enabled": true,
       "scenario": "append-only"
     },
     {
       "byte_identical_parity_rate": 1.0,
       "returned_archive_source": "fresh_full_build",
       "run_count": 20,
+      "runtime_substitution_enabled": true,
       "scenario": "small-change"
     },
     {
       "byte_identical_parity_rate": 1.0,
       "returned_archive_source": "fresh_full_build",
       "run_count": 20,
+      "runtime_substitution_enabled": true,
       "scenario": "noisy-change"
     }
   ]

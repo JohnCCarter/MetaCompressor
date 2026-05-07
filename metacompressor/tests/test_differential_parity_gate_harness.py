@@ -19,7 +19,7 @@ _SPEC.loader.exec_module(gate)
 
 def test_parity_gate_writes_outputs(tmp_path: Path) -> None:
     payload = gate.run_harness(output_dir=tmp_path, run_count=4)
-    assert payload["simulation_only"] is True
+    assert payload["runtime_experimental"] is True
     assert (tmp_path / "differential_parity_gate.json").exists()
     assert (tmp_path / "differential_parity_gate.md").exists()
 
@@ -35,6 +35,8 @@ def test_parity_gate_schema_has_required_fields(tmp_path: Path) -> None:
         "verification_mode",
         "returned_archive_source",
         "real_decision_metadata_used",
+        "runtime_substitution_used_rate",
+        "runtime_substitution_fail_reason_counts",
         "workloads",
     }
     assert required.issubset(set(payload.keys()))

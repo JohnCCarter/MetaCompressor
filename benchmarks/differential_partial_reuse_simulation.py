@@ -118,13 +118,18 @@ def _run_workload(
         est_speedup_pct: List[float] = []
         returned_archive_sources: List[str] = []
         real_decision_metadata_used_flags: List[bool] = []
+        runtime_used_flags: List[bool] = []
+        runtime_substitution_ms: List[int] = []
+        runtime_fallback_count = 0
 
         updater(input_dir, 0, rng)
         for i in range(run_count):
             if i > 0:
                 updater(input_dir, i, rng)
             prev_flag = os.environ.get("MC_ENABLE_PARTIAL_REUSE_EXPERIMENT")
+            prev_runtime_flag = os.environ.get("MC_ENABLE_PARTIAL_REUSE_RUNTIME")
             os.environ["MC_ENABLE_PARTIAL_REUSE_EXPERIMENT"] = "1"
+            os.environ["MC_ENABLE_PARTIAL_REUSE_RUNTIME"] = "1"
             try:
                 t0 = time.perf_counter()
                 result = compress_corpus_differential(input_dir, cache_dir)
@@ -133,6 +138,10 @@ def _run_workload(
                     os.environ.pop("MC_ENABLE_PARTIAL_REUSE_EXPERIMENT", None)
                 else:
                     os.environ["MC_ENABLE_PARTIAL_REUSE_EXPERIMENT"] = prev_flag
+                if prev_runtime_flag is None:
+                    os.environ.pop("MC_ENABLE_PARTIAL_REUSE_RUNTIME", None)
+                else:
+                    os.environ["MC_ENABLE_PARTIAL_REUSE_RUNTIME"] = prev_runtime_flag
             full_ms = int((time.perf_counter() - t0) * 1000.0)
             report = result.report
             reuse = int(report.get("reuse_chunk_count", 0))
@@ -157,6 +166,13 @@ def _run_workload(
             real_decision_metadata_used_flags.append(
                 bool(report.get("real_decision_metadata_used", False))
             )
+            runtime_used = bool(report.get("runtime_substitution_used", False))
+            runtime_used_flags.append(runtime_used)
+            runtime_substitution_ms.append(
+                int(report.get("runtime_substitution_time_ms", 0))
+            )
+            if not runtime_used:
+                runtime_fallback_count += 1
 
         return {
             "workload_class": workload_class,
@@ -190,6 +206,19 @@ def _run_workload(
                 real_decision_metadata_used_flags
                 and all(real_decision_metadata_used_flags)
             ),
+            "runtime_substitution_used_rate": (
+                sum(1 for v in runtime_used_flags if v) / len(runtime_used_flags)
+                if runtime_used_flags
+                else 0.0
+            ),
+            "runtime_substitution_fallback_rate": (
+                float(runtime_fallback_count) / float(run_count)
+                if run_count > 0
+                else 0.0
+            ),
+            "runtime_substitution_time_ms_avg": (
+                mean(runtime_substitution_ms) if runtime_substitution_ms else 0.0
+            ),
             "sample_size": run_count,
         }
 
@@ -203,8 +232,9 @@ def run_harness(output_dir: Path | None = None, run_count: int = 20) -> Dict[str
     ]
     payload = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "simulation_only": True,
-        "verification_mode": "partial_reuse_simulation",
+        "simulation_only": False,
+        "runtime_experimental": True,
+        "verification_mode": "partial_reuse_runtime_experimental",
         "returned_archive_source": "fresh_full_build",
         "real_decision_metadata_used": bool(
             rows

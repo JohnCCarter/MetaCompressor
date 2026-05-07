@@ -133,6 +133,8 @@ def run_harness(output_dir: Path | None = None, run_count: int = 20) -> Dict[str
     merge_ok_all = True
     noisy_fail_closed_all = True
     fallback_reason_counts: Dict[str, int] = {}
+    runtime_fail_reason_counts: Dict[str, int] = {}
+    runtime_used_count = 0
     workload_rows: List[Dict[str, Any]] = []
     real_decision_metadata_used_all = True
 
@@ -156,7 +158,9 @@ def run_harness(output_dir: Path | None = None, run_count: int = 20) -> Dict[str
                 if i > 0:
                     updater(input_dir, i, rng)
                 prev_flag = os.environ.get("MC_ENABLE_PARTIAL_REUSE_EXPERIMENT")
+                prev_runtime_flag = os.environ.get("MC_ENABLE_PARTIAL_REUSE_RUNTIME")
                 os.environ["MC_ENABLE_PARTIAL_REUSE_EXPERIMENT"] = "1"
+                os.environ["MC_ENABLE_PARTIAL_REUSE_RUNTIME"] = "1"
                 try:
                     result = compress_corpus_differential(input_dir, cache_dir)
                 finally:
@@ -164,10 +168,25 @@ def run_harness(output_dir: Path | None = None, run_count: int = 20) -> Dict[str
                         os.environ.pop("MC_ENABLE_PARTIAL_REUSE_EXPERIMENT", None)
                     else:
                         os.environ["MC_ENABLE_PARTIAL_REUSE_EXPERIMENT"] = prev_flag
+                    if prev_runtime_flag is None:
+                        os.environ.pop("MC_ENABLE_PARTIAL_REUSE_RUNTIME", None)
+                    else:
+                        os.environ["MC_ENABLE_PARTIAL_REUSE_RUNTIME"] = (
+                            prev_runtime_flag
+                        )
                 fresh_archive = result.archive
                 returned_archive_source = str(
                     result.report.get("returned_archive_source", "unknown")
                 )
+                if bool(result.report.get("runtime_substitution_used", False)):
+                    runtime_used_count += 1
+                runtime_fail_reason = result.report.get(
+                    "runtime_substitution_fail_reason"
+                )
+                if isinstance(runtime_fail_reason, str) and runtime_fail_reason:
+                    runtime_fail_reason_counts[runtime_fail_reason] = (
+                        runtime_fail_reason_counts.get(runtime_fail_reason, 0) + 1
+                    )
                 real_decision_metadata_used_all = (
                     real_decision_metadata_used_all
                     and bool(result.report.get("real_decision_metadata_used", False))
@@ -222,6 +241,9 @@ def run_harness(output_dir: Path | None = None, run_count: int = 20) -> Dict[str
                     "scenario": scenario,
                     "run_count": run_count,
                     "returned_archive_source": returned_archive_source,
+                    "runtime_substitution_enabled": bool(
+                        result.report.get("runtime_substitution_enabled", False)
+                    ),
                     "byte_identical_parity_rate": (
                         scenario_parity / scenario_total if scenario_total else 0.0
                     ),
@@ -230,14 +252,21 @@ def run_harness(output_dir: Path | None = None, run_count: int = 20) -> Dict[str
 
     payload = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "simulation_only": True,
+        "simulation_only": False,
+        "runtime_experimental": True,
         "run_count": run_count,
         "byte_identical_parity_rate": (parity_hits / total) if total else 0.0,
         "strategy_encoding_match_rate": (strategy_hits / total) if total else 0.0,
         "deterministic_merge_status": "pass" if merge_ok_all else "fail",
         "fallback_reason_counts": dict(sorted(fallback_reason_counts.items())),
+        "runtime_substitution_fail_reason_counts": dict(
+            sorted(runtime_fail_reason_counts.items())
+        ),
+        "runtime_substitution_used_rate": (
+            (runtime_used_count / total) if total else 0.0
+        ),
         "noisy_fail_closed_status": "pass" if noisy_fail_closed_all else "fail",
-        "verification_mode": "partial_reuse_simulation",
+        "verification_mode": "partial_reuse_runtime_experimental",
         "returned_archive_source": "fresh_full_build",
         "real_decision_metadata_used": bool(real_decision_metadata_used_all),
         "workloads": workload_rows,

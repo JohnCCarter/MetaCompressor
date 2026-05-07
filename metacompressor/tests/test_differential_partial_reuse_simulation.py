@@ -19,7 +19,7 @@ _SPEC.loader.exec_module(sim)
 
 def test_simulation_harness_writes_outputs(tmp_path: Path) -> None:
     payload = sim.run_harness(output_dir=tmp_path, run_count=3)
-    assert payload["simulation_only"] is True
+    assert payload["runtime_experimental"] is True
     assert (tmp_path / "differential_partial_reuse_simulation.json").exists()
     assert (tmp_path / "differential_partial_reuse_simulation.md").exists()
 
@@ -38,6 +38,9 @@ def test_simulation_schema_contains_required_fields(tmp_path: Path) -> None:
         "estimated_partial_reuse_build_fraction",
         "estimated_partial_reuse_speedup_pct",
         "real_decision_metadata_used",
+        "runtime_substitution_used_rate",
+        "runtime_substitution_fallback_rate",
+        "runtime_substitution_time_ms_avg",
         "sample_size",
     }
     for row in payload["workloads"]:
