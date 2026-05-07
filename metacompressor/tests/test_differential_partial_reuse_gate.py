@@ -71,6 +71,12 @@ def test_fallback_reasons_have_deterministic_keyset(
             "real_decision_metadata_unavailable",
             "strategy_encoding_real_mismatch",
             "byte_parity_mismatch",
+            "artifact_missing",
+            "artifact_schema_invalid",
+            "artifact_hash_mismatch",
+            "runtime_strategy_mismatch",
+            "runtime_substitution_parity_mismatch",
+            "runtime_replay_nondeterministic",
         ]
     )
     assert all(isinstance(v, int) for v in reasons.values())
@@ -141,6 +147,16 @@ def test_report_completeness_fields_present(tmp_path: Path, monkeypatch) -> None
         "fallback_reason_counts",
         "gates_evaluated",
         "gates_failed",
+        "runtime_substitution_enabled",
+        "runtime_substitution_attempted",
+        "runtime_substitution_used",
+        "runtime_substitution_fail_reason",
+        "runtime_substitution_candidate_equal_fresh",
+        "runtime_replay_deterministic",
+        "runtime_substitution_time_ms",
+        "runtime_validation_overhead_ms",
+        "runtime_substitution_reused_chunks",
+        "runtime_substitution_rebuilt_chunks",
     }
     assert required.issubset(result.report.keys())
     assert result.report["returned_archive_source"] == "fresh_full_build"
@@ -253,3 +269,39 @@ def test_noisy_gate_fail_closed(tmp_path: Path, monkeypatch) -> None:
     if result.report["reason"] == "noisy_fail_closed":
         assert result.report["noisy_fail_closed_pass"] is True
         assert result.report["fallback_reason_counts"]["noisy_fail_closed"] >= 1
+
+
+def test_runtime_substitution_experimental_still_returns_fresh(
+    tmp_path: Path, monkeypatch
+) -> None:
+    corpus = tmp_path / "corpus"
+    cache = tmp_path / "cache"
+    _write_corpus(corpus, _SAMPLE)
+    compress_corpus_differential(corpus, cache)
+    monkeypatch.setenv("MC_ENABLE_PARTIAL_REUSE_RUNTIME", "1")
+    result = compress_corpus_differential(corpus, cache)
+    assert result.report["runtime_substitution_enabled"] is True
+    assert result.report["runtime_substitution_attempted"] is True
+    assert result.report["returned_archive_source"] == "fresh_full_build"
+    assert isinstance(result.archive, bytes)
+    assert len(result.archive) > 0
+
+
+def test_runtime_substitution_noisy_fail_closed(tmp_path: Path, monkeypatch) -> None:
+    corpus = tmp_path / "corpus"
+    cache = tmp_path / "cache"
+    _write_corpus(corpus, _SAMPLE)
+    compress_corpus_differential(corpus, cache)
+    for i in range(8):
+        (corpus / "alpha.txt").write_bytes((f"a{i}" * 4096).encode("utf-8"))
+        (corpus / "beta.txt").write_bytes((f"b{i}" * 4096).encode("utf-8"))
+    monkeypatch.setenv("MC_ENABLE_PARTIAL_REUSE_RUNTIME", "1")
+    result = compress_corpus_differential(corpus, cache)
+    assert result.report["runtime_substitution_enabled"] is True
+    assert result.report["fail_closed"] is True
+    assert result.report["reason"] in (
+        "noisy_fail_closed",
+        "runtime_substitution_parity_mismatch",
+        "runtime_strategy_mismatch",
+        "byte_parity_mismatch",
+    )

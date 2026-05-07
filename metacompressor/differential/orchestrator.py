@@ -12,9 +12,10 @@ import json
 import logging
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from metacompressor.corpus import compress_corpus
 from metacompressor.corpus_template import compress_corpus_template_with_metrics
@@ -23,14 +24,19 @@ from metacompressor.utils import CHUNK_SIZE
 from .core import Manifest, build_manifest, build_reuse_plan, diff_manifests
 from .persistence import (
     ARCHIVE_FILENAME,
+    CHUNK_ARTIFACTS_FILENAME,
     MANIFEST_FILENAME,
     RECEIPTS_FILENAME,
     load_archive,
+    load_chunk_artifacts,
     load_manifest,
     load_receipts,
+    make_chunk_artifact_metadata,
     save_archive,
+    save_chunk_artifacts,
     save_manifest,
     save_receipts,
+    validate_chunk_artifact_metadata,
 )
 
 _log = logging.getLogger(__name__)
@@ -56,6 +62,12 @@ _MISS_REASON_KEYS = (
     "real_decision_metadata_unavailable",
     "strategy_encoding_real_mismatch",
     "byte_parity_mismatch",
+    "artifact_missing",
+    "artifact_schema_invalid",
+    "artifact_hash_mismatch",
+    "runtime_strategy_mismatch",
+    "runtime_substitution_parity_mismatch",
+    "runtime_replay_nondeterministic",
 )
 
 
@@ -89,6 +101,11 @@ def compress_corpus_differential(
     partial_reuse_experiment_enabled = _env_enabled(
         os.environ.get("MC_ENABLE_PARTIAL_REUSE_EXPERIMENT")
     )
+    runtime_substitution_enabled = _env_enabled(
+        os.environ.get("MC_ENABLE_PARTIAL_REUSE_RUNTIME")
+    )
+    if runtime_substitution_enabled:
+        partial_reuse_experiment_enabled = True
     real_decision_metadata = _compute_real_decision_metadata(input_dir)
 
     new_manifest = build_manifest(input_dir, chunk_size_bytes=chunk_size)
@@ -96,6 +113,7 @@ def compress_corpus_differential(
     old_manifest = load_manifest(cache_dir / MANIFEST_FILENAME)
     old_receipts = load_receipts(cache_dir / RECEIPTS_FILENAME)
     old_archive = load_archive(cache_dir / ARCHIVE_FILENAME)
+    old_chunk_artifacts = load_chunk_artifacts(cache_dir / CHUNK_ARTIFACTS_FILENAME)
     old_meta = _load_cache_meta(cache_dir / _CACHE_META_FILENAME)
 
     cache_hit_candidate = False
@@ -113,6 +131,15 @@ def compress_corpus_differential(
     real_decision_metadata_used = False
     gates_evaluated = 0
     gates_failed = 0
+    runtime_substitution_attempted = False
+    runtime_substitution_used = False
+    runtime_substitution_fail_reason: Optional[str] = None
+    runtime_substitution_candidate_equal_fresh: Optional[bool] = None
+    runtime_replay_deterministic: Optional[bool] = None
+    runtime_substitution_time_ms = 0
+    runtime_validation_overhead_ms = 0
+    runtime_reused_chunks = 0
+    runtime_rebuilt_chunks = 0
 
     if old_manifest is not None and old_archive is not None and old_meta is not None:
         meta_ok = _meta_matches(old_meta, chunk_size, use_delta)
@@ -253,6 +280,75 @@ def compress_corpus_differential(
             miss_reasons["byte_parity_mismatch"] += 1
             gates_failed += 1
 
+        if runtime_substitution_enabled and old_manifest is not None:
+            runtime_reused_chunks = int(reuse_count)
+            runtime_rebuilt_chunks = int(rescan_count)
+            if fail_closed:
+                runtime_substitution_attempted = False
+                runtime_substitution_used = False
+                runtime_substitution_fail_reason = reason
+            else:
+                runtime_substitution_attempted = True
+                t_runtime_start = time.perf_counter()
+                (
+                    runtime_archive_candidate,
+                    runtime_fail_reason,
+                    runtime_replay_deterministic,
+                ) = _build_runtime_substitution_candidate(
+                    input_dir=input_dir,
+                    cache_dir=cache_dir,
+                    new_manifest=new_manifest,
+                    reuse_chunks=(
+                        tuple(plan.reuse_chunks) if "plan" in locals() else tuple()
+                    ),
+                    rescan_chunks=(
+                        tuple(plan.rescan_chunks) if "plan" in locals() else tuple()
+                    ),
+                    old_chunk_artifacts=old_chunk_artifacts,
+                    old_receipts=old_receipts,
+                    chunk_size=chunk_size,
+                    use_delta=use_delta,
+                    expected_real_decision_metadata=real_decision_metadata,
+                )
+                runtime_substitution_time_ms = int(
+                    (time.perf_counter() - t_runtime_start) * 1000.0
+                )
+                runtime_validation_overhead_ms = runtime_substitution_time_ms
+                if runtime_fail_reason is not None or runtime_archive_candidate is None:
+                    runtime_substitution_fail_reason = runtime_fail_reason
+                    fail_closed = True
+                    if runtime_fail_reason is not None:
+                        reason = runtime_fail_reason
+                        if runtime_fail_reason in miss_reasons:
+                            miss_reasons[runtime_fail_reason] += 1
+                    gates_failed += 1
+                    runtime_substitution_used = False
+                else:
+                    runtime_substitution_candidate_equal_fresh = (
+                        runtime_archive_candidate == fresh_archive
+                    )
+                    if not runtime_substitution_candidate_equal_fresh:
+                        fail_closed = True
+                        reason = "runtime_substitution_parity_mismatch"
+                        miss_reasons["runtime_substitution_parity_mismatch"] += 1
+                        gates_failed += 1
+                        runtime_substitution_used = False
+                    elif runtime_replay_deterministic is False:
+                        fail_closed = True
+                        reason = "runtime_replay_nondeterministic"
+                        miss_reasons["runtime_replay_nondeterministic"] += 1
+                        gates_failed += 1
+                        runtime_substitution_used = False
+                    else:
+                        runtime_substitution_used = True
+
+    _persist_chunk_artifacts(
+        input_dir=input_dir,
+        cache_dir=cache_dir,
+        manifest=new_manifest,
+        chunk_size=chunk_size,
+        use_delta=use_delta,
+    )
     receipts = _build_receipts(new_manifest)
     save_manifest(new_manifest, cache_dir / MANIFEST_FILENAME)
     save_receipts(receipts, cache_dir / RECEIPTS_FILENAME)
@@ -280,7 +376,11 @@ def compress_corpus_differential(
         report.update(
             {
                 "partial_reuse_experiment_enabled": True,
-                "verification_mode": "partial_reuse_simulation",
+                "verification_mode": (
+                    "partial_reuse_runtime_experimental"
+                    if runtime_substitution_enabled
+                    else "partial_reuse_simulation"
+                ),
                 "returned_archive_source": "fresh_full_build",
                 "byte_identical_parity_pass": bool(byte_identical_parity_pass),
                 "strategy_encoding_real_match_pass": bool(
@@ -292,6 +392,16 @@ def compress_corpus_differential(
                 "gates_evaluated": int(gates_evaluated),
                 "gates_failed": int(gates_failed),
                 "fallback_reason_counts": dict(miss_reasons),
+                "runtime_substitution_enabled": bool(runtime_substitution_enabled),
+                "runtime_substitution_attempted": bool(runtime_substitution_attempted),
+                "runtime_substitution_used": bool(runtime_substitution_used),
+                "runtime_substitution_fail_reason": runtime_substitution_fail_reason,
+                "runtime_substitution_candidate_equal_fresh": runtime_substitution_candidate_equal_fresh,
+                "runtime_replay_deterministic": runtime_replay_deterministic,
+                "runtime_substitution_time_ms": int(runtime_substitution_time_ms),
+                "runtime_validation_overhead_ms": int(runtime_validation_overhead_ms),
+                "runtime_substitution_reused_chunks": int(runtime_reused_chunks),
+                "runtime_substitution_rebuilt_chunks": int(runtime_rebuilt_chunks),
             }
         )
     return DifferentialCompressResult(archive=fresh_archive, report=report)
@@ -425,6 +535,126 @@ def _validate_simulated_selective_candidate(
     if len(merged) != expected:
         return False, "deterministic_merge_violation"
     return True, None
+
+
+def _artifact_file_path(cache_dir: Path, chunk_id: str) -> Path:
+    artifact_key = hashlib.sha256(chunk_id.encode("utf-8")).hexdigest()
+    return cache_dir / "chunks" / f"{artifact_key}.bin"
+
+
+def _persist_chunk_artifacts(
+    *,
+    input_dir: Path,
+    cache_dir: Path,
+    manifest: Manifest,
+    chunk_size: int,
+    use_delta: bool,
+) -> None:
+    file_cache: Dict[str, bytes] = {}
+    artifacts: Dict[str, Any] = {}
+    for chunk in manifest.chunks:
+        rel = chunk.relative_path
+        if rel not in file_cache:
+            file_cache[rel] = (input_dir / rel).read_bytes()
+        data = file_cache[rel]
+        start = int(chunk.chunk_index) * int(chunk_size)
+        payload = data[start : start + int(chunk.size_bytes)]
+        if len(payload) != int(chunk.size_bytes):
+            continue
+        artifact_hash = hashlib.sha256(payload).hexdigest()
+        artifact_path = _artifact_file_path(cache_dir, chunk.chunk_id)
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_bytes(payload)
+        artifacts[chunk.chunk_id] = make_chunk_artifact_metadata(
+            encoder_version=_ORCHESTRATOR_VERSION,
+            chunk_hash=chunk.chunk_hash,
+            size_bytes=chunk.size_bytes,
+            chunk_size=chunk_size,
+            use_delta=use_delta,
+            profile_flags=["runtime_experimental"],
+            path_hint=chunk.chunk_id,
+            artifact_hash=artifact_hash,
+        )
+    save_chunk_artifacts(artifacts, cache_dir / CHUNK_ARTIFACTS_FILENAME)
+
+
+def _build_runtime_substitution_candidate(
+    *,
+    input_dir: Path,
+    cache_dir: Path,
+    new_manifest: Manifest,
+    reuse_chunks: Tuple[str, ...],
+    rescan_chunks: Tuple[str, ...],
+    old_chunk_artifacts: Dict[str, Any],
+    old_receipts: Dict[str, Any],
+    chunk_size: int,
+    use_delta: bool,
+    expected_real_decision_metadata: Optional[Dict[str, Any]],
+) -> Tuple[Optional[bytes], Optional[str], Optional[bool]]:
+    reuse_set = set(reuse_chunks)
+    rescan_set = set(rescan_chunks)
+    file_cache: Dict[str, bytes] = {}
+    by_file: Dict[str, bytearray] = {}
+    try:
+        with tempfile.TemporaryDirectory(prefix="mc_runtime_substitution_") as tmp:
+            tmp_dir = Path(tmp)
+            for chunk in new_manifest.chunks:
+                if chunk.relative_path not in by_file:
+                    by_file[chunk.relative_path] = bytearray()
+                if chunk.chunk_id in reuse_set:
+                    meta = old_chunk_artifacts.get(chunk.chunk_id)
+                    valid, _reason = validate_chunk_artifact_metadata(meta)
+                    if not valid:
+                        return None, "artifact_schema_invalid", None
+                    if str(meta.get("chunk_hash", "")) != str(chunk.chunk_hash):
+                        return None, "artifact_hash_mismatch", None
+                    if int(meta.get("size_bytes", -1)) != int(chunk.size_bytes):
+                        return None, "artifact_schema_invalid", None
+                    receipt = old_receipts.get(chunk.chunk_id, {})
+                    if not isinstance(receipt, dict):
+                        return None, "receipt_missing", None
+                    if str(receipt.get("chunk_hash", "")) != str(
+                        chunk.chunk_hash
+                    ) or int(receipt.get("size_bytes", -1)) != int(chunk.size_bytes):
+                        return None, "receipt_mismatch", None
+                    artifact_path = _artifact_file_path(cache_dir, chunk.chunk_id)
+                    if not artifact_path.exists():
+                        return None, "artifact_missing", None
+                    payload = artifact_path.read_bytes()
+                    if hashlib.sha256(payload).hexdigest() != str(
+                        meta.get("artifact_hash", "")
+                    ):
+                        return None, "artifact_hash_mismatch", None
+                    by_file[chunk.relative_path].extend(payload)
+                elif chunk.chunk_id in rescan_set:
+                    rel = chunk.relative_path
+                    if rel not in file_cache:
+                        file_cache[rel] = (input_dir / rel).read_bytes()
+                    data = file_cache[rel]
+                    start = int(chunk.chunk_index) * int(chunk_size)
+                    payload = data[start : start + int(chunk.size_bytes)]
+                    if len(payload) != int(chunk.size_bytes):
+                        return None, "manifest_changed", None
+                    by_file[chunk.relative_path].extend(payload)
+                else:
+                    return None, "manifest_changed", None
+            for rel, payload in by_file.items():
+                out_path = tmp_dir / rel
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_bytes(bytes(payload))
+            runtime_archive = compress_corpus(
+                tmp_dir, chunk_size=chunk_size, use_delta=use_delta
+            )
+            replay_archive = compress_corpus(
+                tmp_dir, chunk_size=chunk_size, use_delta=use_delta
+            )
+            replay_deterministic = bool(runtime_archive == replay_archive)
+            runtime_real_decision = _compute_real_decision_metadata(tmp_dir)
+            if runtime_real_decision != expected_real_decision_metadata:
+                return None, "runtime_strategy_mismatch", replay_deterministic
+            return runtime_archive, None, replay_deterministic
+    except Exception:
+        return None, "runtime_replay_nondeterministic", None
 
 
 def _compute_real_decision_metadata(input_dir: Path) -> Optional[Dict[str, Any]]:
