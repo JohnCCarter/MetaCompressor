@@ -1,0 +1,391 @@
+{
+  "cache_return_enabled": false,
+  "generated_at": "2026-05-07T14:05:06Z",
+  "mutating_archives_equal_given_hit_avg": 1.0,
+  "mutating_hit_rate_avg": 0.4125,
+  "phase3_recommendation": "no_go_keep_verification_mode",
+  "run_count_per_workload": 20,
+  "verification_mode_only": true,
+  "workloads": [
+    {
+      "archives_equal_given_cache_hit_rate": 1.0,
+      "archives_equal_rate": 0.95,
+      "cache_hit_candidate_rate": 0.95,
+      "cache_miss_reason_counts": {
+        "no_cached_manifest": 1
+      },
+      "detailed_miss_reason_counts": {
+        "archive_missing": 1,
+        "chunk_hash_changed": 0,
+        "chunk_size_changed": 0,
+        "config_mismatch": 0,
+        "deleted_chunks": 0,
+        "low_confidence": 0,
+        "manifest_changed": 0,
+        "new_chunks": 0,
+        "noisy_entropy_shift": 0,
+        "receipt_mismatch": 0,
+        "receipt_missing": 0
+      },
+      "determinism_status": "pass",
+      "estimated_benefit_if_partial_reuse_existed": 0,
+      "lossless_status": "pass",
+      "partial_reuse_opportunity_count": 0,
+      "rescan_chunk_distribution": {
+        "avg": 0,
+        "max": 0,
+        "min": 0,
+        "stdev": 0.0
+      },
+      "rescan_chunk_ratio_avg": 0.0,
+      "reusable_but_not_hit_chunks_avg": 0,
+      "reuse_chunk_distribution": {
+        "avg": 0,
+        "max": 0,
+        "min": 0,
+        "stdev": 0.0
+      },
+      "reuse_chunk_ratio_avg": 0.0,
+      "run_count": 20,
+      "sample_size": 20,
+      "scenario": "unchanged",
+      "top_miss_reason": "archive_missing",
+      "total_time_ms_avg": 4.8,
+      "total_time_ms_stdev": 0.9273618495495703,
+      "workload_class": "append-only logs"
+    },
+    {
+      "archives_equal_given_cache_hit_rate": 1.0,
+      "archives_equal_rate": 0.45,
+      "cache_hit_candidate_rate": 0.45,
+      "cache_miss_reason_counts": {
+        "None": 10,
+        "no_cached_manifest": 1
+      },
+      "detailed_miss_reason_counts": {
+        "archive_missing": 1,
+        "chunk_hash_changed": 10,
+        "chunk_size_changed": 10,
+        "config_mismatch": 0,
+        "deleted_chunks": 0,
+        "low_confidence": 0,
+        "manifest_changed": 10,
+        "new_chunks": 0,
+        "noisy_entropy_shift": 0,
+        "receipt_mismatch": 0,
+        "receipt_missing": 0
+      },
+      "determinism_status": "pass",
+      "estimated_benefit_if_partial_reuse_existed": 55.45454545454545,
+      "lossless_status": "pass",
+      "partial_reuse_opportunity_count": 10,
+      "rescan_chunk_distribution": {
+        "avg": 0.5,
+        "max": 1,
+        "min": 0,
+        "stdev": 0.5
+      },
+      "rescan_chunk_ratio_avg": 0.008064516129032258,
+      "reusable_but_not_hit_chunks_avg": 55.45454545454545,
+      "reuse_chunk_distribution": {
+        "avg": 58.4,
+        "max": 62,
+        "min": 0,
+        "stdev": 13.406714735534578
+      },
+      "reuse_chunk_ratio_avg": 0.9419354838709677,
+      "run_count": 20,
+      "sample_size": 20,
+      "scenario": "append-only",
+      "top_miss_reason": "chunk_hash_changed",
+      "total_time_ms_avg": 30.25,
+      "total_time_ms_stdev": 2.2107690969434146,
+      "workload_class": "append-only logs"
+    },
+    {
+      "archives_equal_given_cache_hit_rate": 1.0,
+      "archives_equal_rate": 0.95,
+      "cache_hit_candidate_rate": 0.95,
+      "cache_miss_reason_counts": {
+        "no_cached_manifest": 1
+      },
+      "detailed_miss_reason_counts": {
+        "archive_missing": 1,
+        "chunk_hash_changed": 0,
+        "chunk_size_changed": 0,
+        "config_mismatch": 0,
+        "deleted_chunks": 0,
+        "low_confidence": 0,
+        "manifest_changed": 0,
+        "new_chunks": 0,
+        "noisy_entropy_shift": 0,
+        "receipt_mismatch": 0,
+        "receipt_missing": 0
+      },
+      "determinism_status": "pass",
+      "estimated_benefit_if_partial_reuse_existed": 0,
+      "lossless_status": "pass",
+      "partial_reuse_opportunity_count": 0,
+      "rescan_chunk_distribution": {
+        "avg": 0,
+        "max": 0,
+        "min": 0,
+        "stdev": 0.0
+      },
+      "rescan_chunk_ratio_avg": 0.0,
+      "reusable_but_not_hit_chunks_avg": 0,
+      "reuse_chunk_distribution": {
+        "avg": 0,
+        "max": 0,
+        "min": 0,
+        "stdev": 0.0
+      },
+      "reuse_chunk_ratio_avg": 0.0,
+      "run_count": 20,
+      "sample_size": 20,
+      "scenario": "unchanged",
+      "top_miss_reason": "archive_missing",
+      "total_time_ms_avg": 4.55,
+      "total_time_ms_stdev": 0.8046738469715541,
+      "workload_class": "structured corpora"
+    },
+    {
+      "archives_equal_given_cache_hit_rate": 1.0,
+      "archives_equal_rate": 0.9,
+      "cache_hit_candidate_rate": 0.9,
+      "cache_miss_reason_counts": {
+        "None": 1,
+        "no_cached_manifest": 1
+      },
+      "detailed_miss_reason_counts": {
+        "archive_missing": 1,
+        "chunk_hash_changed": 1,
+        "chunk_size_changed": 0,
+        "config_mismatch": 0,
+        "deleted_chunks": 0,
+        "low_confidence": 0,
+        "manifest_changed": 1,
+        "new_chunks": 0,
+        "noisy_entropy_shift": 0,
+        "receipt_mismatch": 0,
+        "receipt_missing": 0
+      },
+      "determinism_status": "pass",
+      "estimated_benefit_if_partial_reuse_existed": 42,
+      "lossless_status": "pass",
+      "partial_reuse_opportunity_count": 1,
+      "rescan_chunk_distribution": {
+        "avg": 0.05,
+        "max": 1,
+        "min": 0,
+        "stdev": 0.21794494717703367
+      },
+      "rescan_chunk_ratio_avg": 0.000588235294117647,
+      "reusable_but_not_hit_chunks_avg": 42,
+      "reuse_chunk_distribution": {
+        "avg": 80.7,
+        "max": 85,
+        "min": 0,
+        "stdev": 18.515128949051366
+      },
+      "reuse_chunk_ratio_avg": 0.9494117647058824,
+      "run_count": 20,
+      "sample_size": 20,
+      "scenario": "small-change",
+      "top_miss_reason": "archive_missing",
+      "total_time_ms_avg": 24.5,
+      "total_time_ms_stdev": 1.857417562100671,
+      "workload_class": "structured corpora"
+    },
+    {
+      "archives_equal_given_cache_hit_rate": 1.0,
+      "archives_equal_rate": 0.95,
+      "cache_hit_candidate_rate": 0.95,
+      "cache_miss_reason_counts": {
+        "no_cached_manifest": 1
+      },
+      "detailed_miss_reason_counts": {
+        "archive_missing": 1,
+        "chunk_hash_changed": 0,
+        "chunk_size_changed": 0,
+        "config_mismatch": 0,
+        "deleted_chunks": 0,
+        "low_confidence": 0,
+        "manifest_changed": 0,
+        "new_chunks": 0,
+        "noisy_entropy_shift": 0,
+        "receipt_mismatch": 0,
+        "receipt_missing": 0
+      },
+      "determinism_status": "pass",
+      "estimated_benefit_if_partial_reuse_existed": 0,
+      "lossless_status": "pass",
+      "partial_reuse_opportunity_count": 0,
+      "rescan_chunk_distribution": {
+        "avg": 0,
+        "max": 0,
+        "min": 0,
+        "stdev": 0.0
+      },
+      "rescan_chunk_ratio_avg": 0.0,
+      "reusable_but_not_hit_chunks_avg": 0,
+      "reuse_chunk_distribution": {
+        "avg": 0,
+        "max": 0,
+        "min": 0,
+        "stdev": 0.0
+      },
+      "reuse_chunk_ratio_avg": 0.0,
+      "run_count": 20,
+      "sample_size": 20,
+      "scenario": "unchanged",
+      "top_miss_reason": "archive_missing",
+      "total_time_ms_avg": 4.65,
+      "total_time_ms_stdev": 0.792148975887743,
+      "workload_class": "mixed binaries"
+    },
+    {
+      "archives_equal_given_cache_hit_rate": 1.0,
+      "archives_equal_rate": 0.3,
+      "cache_hit_candidate_rate": 0.3,
+      "cache_miss_reason_counts": {
+        "None": 13,
+        "no_cached_manifest": 1
+      },
+      "detailed_miss_reason_counts": {
+        "archive_missing": 1,
+        "chunk_hash_changed": 13,
+        "chunk_size_changed": 7,
+        "config_mismatch": 0,
+        "deleted_chunks": 0,
+        "low_confidence": 0,
+        "manifest_changed": 13,
+        "new_chunks": 0,
+        "noisy_entropy_shift": 0,
+        "receipt_mismatch": 0,
+        "receipt_missing": 0
+      },
+      "determinism_status": "pass",
+      "estimated_benefit_if_partial_reuse_existed": 137.42857142857142,
+      "lossless_status": "pass",
+      "partial_reuse_opportunity_count": 13,
+      "rescan_chunk_distribution": {
+        "avg": 0.65,
+        "max": 1,
+        "min": 0,
+        "stdev": 0.47696960070847283
+      },
+      "rescan_chunk_ratio_avg": 0.00436241610738255,
+      "reusable_but_not_hit_chunks_avg": 137.42857142857142,
+      "reuse_chunk_distribution": {
+        "avg": 140.9,
+        "max": 149,
+        "min": 0,
+        "stdev": 32.327851769024186
+      },
+      "reuse_chunk_ratio_avg": 0.9456375838926174,
+      "run_count": 20,
+      "sample_size": 20,
+      "scenario": "small-change",
+      "top_miss_reason": "chunk_hash_changed",
+      "total_time_ms_avg": 25.05,
+      "total_time_ms_stdev": 2.1324868112136124,
+      "workload_class": "mixed binaries"
+    },
+    {
+      "archives_equal_given_cache_hit_rate": 1.0,
+      "archives_equal_rate": 0.95,
+      "cache_hit_candidate_rate": 0.95,
+      "cache_miss_reason_counts": {
+        "no_cached_manifest": 1
+      },
+      "detailed_miss_reason_counts": {
+        "archive_missing": 1,
+        "chunk_hash_changed": 0,
+        "chunk_size_changed": 0,
+        "config_mismatch": 0,
+        "deleted_chunks": 0,
+        "low_confidence": 0,
+        "manifest_changed": 0,
+        "new_chunks": 0,
+        "noisy_entropy_shift": 0,
+        "receipt_mismatch": 0,
+        "receipt_missing": 0
+      },
+      "determinism_status": "pass",
+      "estimated_benefit_if_partial_reuse_existed": 0,
+      "lossless_status": "pass",
+      "partial_reuse_opportunity_count": 0,
+      "rescan_chunk_distribution": {
+        "avg": 0,
+        "max": 0,
+        "min": 0,
+        "stdev": 0.0
+      },
+      "rescan_chunk_ratio_avg": 0.0,
+      "reusable_but_not_hit_chunks_avg": 0,
+      "reuse_chunk_distribution": {
+        "avg": 0,
+        "max": 0,
+        "min": 0,
+        "stdev": 0.0
+      },
+      "reuse_chunk_ratio_avg": 0.0,
+      "run_count": 20,
+      "sample_size": 20,
+      "scenario": "unchanged",
+      "top_miss_reason": "archive_missing",
+      "total_time_ms_avg": 4.85,
+      "total_time_ms_stdev": 1.1521718621802912,
+      "workload_class": "noisy datasets"
+    },
+    {
+      "archives_equal_given_cache_hit_rate": null,
+      "archives_equal_rate": 0.0,
+      "cache_hit_candidate_rate": 0.0,
+      "cache_miss_reason_counts": {
+        "None": 19,
+        "no_cached_manifest": 1
+      },
+      "detailed_miss_reason_counts": {
+        "archive_missing": 1,
+        "chunk_hash_changed": 817,
+        "chunk_size_changed": 19,
+        "config_mismatch": 0,
+        "deleted_chunks": 0,
+        "low_confidence": 0,
+        "manifest_changed": 19,
+        "new_chunks": 0,
+        "noisy_entropy_shift": 19,
+        "receipt_mismatch": 0,
+        "receipt_missing": 0
+      },
+      "determinism_status": "pass",
+      "estimated_benefit_if_partial_reuse_existed": 0,
+      "lossless_status": "pass",
+      "partial_reuse_opportunity_count": 0,
+      "rescan_chunk_distribution": {
+        "avg": 40.85,
+        "max": 43,
+        "min": 0,
+        "stdev": 9.371632728612449
+      },
+      "rescan_chunk_ratio_avg": 0.95,
+      "reusable_but_not_hit_chunks_avg": 0,
+      "reuse_chunk_distribution": {
+        "avg": 0,
+        "max": 0,
+        "min": 0,
+        "stdev": 0.0
+      },
+      "reuse_chunk_ratio_avg": 0.0,
+      "run_count": 20,
+      "sample_size": 20,
+      "scenario": "noisy-change",
+      "top_miss_reason": "chunk_hash_changed",
+      "total_time_ms_avg": 37.15,
+      "total_time_ms_stdev": 1.49248115565993,
+      "workload_class": "noisy datasets"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "byte_identical_parity_rate": 1.0,
+  "deterministic_merge_status": "pass",
+  "fallback_reason_counts": {
+    "noisy_fail_closed": 20
+  },
+  "generated_at": "2026-05-07T15:13:14Z",
+  "noisy_fail_closed_status": "pass",
+  "real_decision_metadata_used": true,
+  "returned_archive_source": "fresh_full_build",
+  "run_count": 20,
+  "simulation_only": true,
+  "strategy_encoding_match_rate": 1.0,
+  "verification_mode": "partial_reuse_simulation",
+  "workloads": [
+    {
+      "byte_identical_parity_rate": 1.0,
+      "returned_archive_source": "fresh_full_build",
+      "run_count": 20,
+      "scenario": "append-only"
+    },
+    {
+      "byte_identical_parity_rate": 1.0,
+      "returned_archive_source": "fresh_full_build",
+      "run_count": 20,
+      "scenario": "small-change"
+    },
+    {
+      "byte_identical_parity_rate": 1.0,
+      "returned_archive_source": "fresh_full_build",
+      "run_count": 20,
+      "scenario": "noisy-change"
+    }
+  ]
+}
