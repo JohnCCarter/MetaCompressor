@@ -1,0 +1,102 @@
+{
+  "commit": "d31d881",
+  "dataset": "structured_scale_100mb",
+  "median": {
+    "line_split_time_ms": 383,
+    "mc_selected_build_time_ms": 115284,
+    "output_size_bytes": 11819419,
+    "placeholder_detection_time_ms": 122,
+    "template_cache_lookup_time_ms": 157,
+    "template_extract_time_ms": 45514,
+    "template_grouping_time_ms": 813,
+    "template_hash_time_ms": 536,
+    "tokenization_time_ms": 33486,
+    "transform_call_time_ms": 100399
+  },
+  "ranked_medians": [
+    [
+      "mc_selected_build_time_ms",
+      115284
+    ],
+    [
+      "transform_call_time_ms",
+      100399
+    ],
+    [
+      "template_extract_time_ms",
+      45514
+    ],
+    [
+      "tokenization_time_ms",
+      33486
+    ],
+    [
+      "template_grouping_time_ms",
+      813
+    ],
+    [
+      "template_hash_time_ms",
+      536
+    ],
+    [
+      "line_split_time_ms",
+      383
+    ],
+    [
+      "template_cache_lookup_time_ms",
+      157
+    ],
+    [
+      "placeholder_detection_time_ms",
+      122
+    ]
+  ],
+  "replicates": 3,
+  "runs": [
+    {
+      "line_split_time_ms": 383,
+      "mc_selected_build_time_ms": 115284,
+      "output_size_bytes": 11819419,
+      "placeholder_detection_time_ms": 122,
+      "replicate": 1,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 157,
+      "template_extract_time_ms": 45514,
+      "template_grouping_time_ms": 815,
+      "template_hash_time_ms": 567,
+      "tokenization_time_ms": 34213,
+      "transform_call_time_ms": 100399
+    },
+    {
+      "line_split_time_ms": 384,
+      "mc_selected_build_time_ms": 129236,
+      "output_size_bytes": 11819419,
+      "placeholder_detection_time_ms": 127,
+      "replicate": 2,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 164,
+      "template_extract_time_ms": 62985,
+      "template_grouping_time_ms": 813,
+      "template_hash_time_ms": 536,
+      "tokenization_time_ms": 33486,
+      "transform_call_time_ms": 116464
+    },
+    {
+      "line_split_time_ms": 321,
+      "mc_selected_build_time_ms": 103313,
+      "output_size_bytes": 11819419,
+      "placeholder_detection_time_ms": 106,
+      "replicate": 3,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 136,
+      "template_extract_time_ms": 39667,
+      "template_grouping_time_ms": 689,
+      "template_hash_time_ms": 448,
+      "tokenization_time_ms": 29152,
+      "transform_call_time_ms": 89731
+    }
+  ],
+  "selected_mode_set": [
+    "corpus_template_columnar_v2"
+  ]
+}

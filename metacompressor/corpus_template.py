@@ -579,7 +579,7 @@ def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]
         best_start = key_match.start("value")
         best_end = key_match.end("value")
         best_kind = "kv"
-        best_kv_key = key_match.group("key").lower()
+        best_kv_key = key_match.group("key")
 
     generic_match = _COMBINED_VAR_RE.search(line, start)
     if generic_match is not None:
@@ -601,7 +601,7 @@ def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]
     if best_kind == "kv":
         if best_kv_key is None:
             return None
-        return best_start, best_end, f"kv:{best_kv_key}"
+        return best_start, best_end, f"kv:{best_kv_key.lower()}"
     return best_start, best_end, best_kind
 
 
