@@ -28,6 +28,27 @@ This policy focuses on **where** content should live, **how** Python modules sho
 ## Scope
 
 This policy applies to the **whole repository**, with different strictness by zone.
+It defines placement and naming structure only (not runtime behavior or governance gates).
+
+### Canonical zone model
+
+To keep decisions portable and explicit, we use a canonical zone model:
+
+- Primary: `src/`, `tests/`, `scripts/`, `tools/`, `config/`
+- Secondary: `docs/`, `.github/`, `registry/`, `data/`
+- Output/hygiene: `artifacts/`, `results/`, `logs/`, `cache/`, `tmp/`, `archive/`
+
+### MetaCompressor mapping (current repository)
+
+This repository currently maps the canonical model to:
+
+- `src/` -> `metacompressor/`
+- `tests/` -> `metacompressor/tests/`
+- `scripts/` -> `scripts/`
+- `tools/` -> (not introduced yet; use `scripts/` unless a durable tool domain appears)
+- `config/` -> (not introduced yet; introduce only with clear authority)
+- `docs/` -> `docs/`
+- output/hygiene -> primarily `results/` + gitignored `tmp_*` / local scratch
 
 ### Primary layout zones (strict)
 
@@ -54,9 +75,11 @@ This policy applies to the **whole repository**, with different strictness by zo
 | Zone | Role |
 |------|------|
 | `results/` | Generated benchmark / validation reports (`*.md`, `*.json`, …). Snapshots may be committed; they are **not** the behavioral spec. |
+| `tmp/` (preferred), `tmp_*` (legacy) | Local temporary scripts and scratch outputs. Treat as disposable; keep gitignored unless explicitly curated. |
 | `mc_test_output/`, `tmp_metacompressor_test/` | Local CLI/test scratch — **must stay gitignored** (see `.gitignore`); never commit generated `.mc1` / `.restored` blobs here. |
+| `archive/` (optional) | Quarantine for retained historical outputs that should not clutter active `results/` workflows. |
 
-**Optional / not used yet:** `artifacts/`, `logs/`, `cache/`, `archive/`—if added, treat like hygiene zones (containment, naming, lifecycle), not homes for active library code.
+**Optional / not used yet:** `artifacts/`, `logs/`, `cache/`—if added, treat like hygiene zones (containment, naming, lifecycle), not homes for active library code.
 
 ### Machine enforcement (Python only)
 
@@ -204,6 +227,7 @@ Narrow local support for one domain (e.g. small helpers colocated or `*_helpers.
 2. **Distinguish** curated docs vs generated reports (reports → `results/`).
 3. **Temporary** work → gitignored dirs (`tmp_*`, `mc_test_output/`); promote to a durable home only when intentional.
 4. **Do not** let `results/` become an undocumented junk drawer—keep names and purposes visible.
+5. If report volume grows, move stale but retained outputs into `archive/` with timestamped subfolders and short index notes.
 
 ## Layout rules for the repository root
 

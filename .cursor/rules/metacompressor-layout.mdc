@@ -1,23 +1,21 @@
 ---
-description: File placement and repository layout; follow docs/repository-layout-policy.md
 alwaysApply: true
 ---
-
 # Where files go
 
 Follow **`docs/repository-layout-policy.md`** for full rules. Summary:
 
 | Kind | Location |
 |------|-----------|
-| Library / runtime Python | `metacompressor/` only |
-| Pytest (`test_*.py`) | `metacompressor/tests/` |
+| Library / runtime Python | `metacompressor/` only (`src/` equivalent in this repo) |
+| Pytest (`test_*.py`) | `metacompressor/tests/` (`tests/` equivalent) |
 | Slow benchmarks, acceptance drivers | `benchmarks/` → reports under `results/` |
 | Policies, ADRs, architecture prose | `docs/` (`docs/adr/` for ADRs) |
 | CI/repo maintenance scripts | `scripts/` (not imported by `metacompressor`) |
 | Cursor rules / skills / commands / subagents | `.cursor/rules`, `.cursor/skills`, `.cursor/commands`, `.cursor/agents` |
 | Workspace editor defaults | `.vscode/` |
-| Local scratch / CLI test dumps | `mc_test_output/`, `tmp_*` (gitignored) — never as sole spec |
+| Local scratch / CLI test dumps | `tmp/` (preferred), `tmp_*` (legacy), `mc_test_output/` (gitignored) — never as sole spec |
 
-Do not add production logic under `benchmarks/` or `results/`. Do not commit large generated blobs without team agreement; prefer regenerating from `benchmarks/`.
+Do not add production logic under `benchmarks/` or `results/`. Do not commit large generated blobs without team agreement; prefer regenerating from `benchmarks/`. If report sprawl grows, quarantine stale artifacts into `archive/`.
 
 Before creating a file, pick the row above; if none fit, extend **`docs/repository-layout-policy.md`** in the same PR.
