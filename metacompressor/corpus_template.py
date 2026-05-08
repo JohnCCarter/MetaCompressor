@@ -749,9 +749,9 @@ def _tokenize_one_file(
                 )
 
             t_cache_lookup_start = time.perf_counter()
-            cache_hit = line in local_tok_cache
+            analysis = local_tok_cache.get(line)
             template_cache_lookup_s += time.perf_counter() - t_cache_lookup_start
-            if cache_hit:
+            if analysis is not None:
                 template_cache_hits += 1
             else:
                 template_cache_misses += 1
@@ -789,15 +789,15 @@ def _tokenize_one_file(
                 pattern_match_s += regex_apply_delta
                 tokenization_s += max(0.0, tokenize_elapsed - regex_apply_delta)
                 local_tok_cache[line] = new_analysis
+                analysis = new_analysis
                 templates_created += 1
-                analysis_new = local_tok_cache[line]
+                analysis_new = new_analysis
                 t_placeholder_start = time.perf_counter()
                 value_count = len(analysis_new.values)
                 tokens_scanned += value_count
                 regex_match_count += value_count
                 _ = analysis_new.template_parts
                 placeholder_detection_s += time.perf_counter() - t_placeholder_start
-            analysis = local_tok_cache[line]
             t_hash_start = time.perf_counter()
             tkey = analysis.template_parts
             file_tpl_count[tkey] = file_tpl_count.get(tkey, 0) + 1
