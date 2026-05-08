@@ -19,6 +19,16 @@ The repository has accumulated many generated reports and temporary profiling ar
    - Keep repo root intentional.
    - Keep runtime code in `metacompressor/`, tests in `metacompressor/tests/`, benchmark drivers in `benchmarks/`, reports in `results/`.
 
+## Initial inventory snapshot (2026-05-08)
+
+- `results/` currently contains high volume report artifacts (`.json`: 38, `.md`: 18).
+- Recent files include stable phase outputs (`phase1`-`phase5`) and many iterative micro-pass outputs from hotpath tuning.
+- Immediate curation candidate patterns:
+  - `results/tokenization_hotpath_safe_pass*.json`
+  - `results/tokenization_micro_opt_compare*.json`
+  - `results/quick_large_cost_profile*.json`
+  - other one-off iterative profiling snapshots with superseded successors
+
 ## Proposed safe cleanup sequence
 
 1. Inventory `results/` into:
