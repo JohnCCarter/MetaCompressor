@@ -215,6 +215,15 @@ def format_delta(mc_size: int, baseline_size: int, baseline_label: str) -> str:
     return f"MC corpus-template is equal in size to {baseline_label}."
 
 
+def _fallback_summary(metrics: dict) -> str:
+    """Return a concise fallback summary for human CLI output."""
+    counts = metrics.get("fallback_reason_counts", {}) or {}
+    if not counts:
+        return "none"
+    top_reason = max(sorted(counts), key=lambda key: counts[key])
+    return f"{top_reason} ({counts[top_reason]})"
+
+
 def cmd_compare_dir(args: argparse.Namespace) -> None:
     """Compare MC corpus / corpus-template / per-file ZSTD / TAR+ZSTD on a directory."""
     input_dir = Path(args.input_dir)
@@ -342,6 +351,14 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
     print(f"  Row mode size       : {row_mode_size:,}")
     print(f"  Columnar vs row     : {metrics['columnar_savings_vs_row']:,} bytes")
     print(f"  Final selected mode : {metrics['final_selected_mode']}")
+    print()
+    print("--- Adoption summary ---")
+    print(f"  Selected path       : {metrics['final_selected_mode']}")
+    print(f"  Verdict             : {metrics.get('verdict', 'n/a')}")
+    print(
+        f"  Safe fallback       : {'yes' if metrics.get('chose_raw_fallback') else 'no'}"
+    )
+    print(f"  Fallback summary    : {_fallback_summary(metrics)}")
 
 
 def build_parser() -> argparse.ArgumentParser:

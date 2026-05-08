@@ -78,3 +78,6 @@ class TestCompareDirOutput:
         assert "Columnar templates" in output
         assert "Encoded columns" in output
         assert "Final selected mode" in output
+        assert "Adoption summary" in output
+        assert "Selected path" in output
+        assert "Safe fallback" in output
