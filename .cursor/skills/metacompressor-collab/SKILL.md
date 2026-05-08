@@ -14,7 +14,7 @@ disable-model-invocation: true
 
 Applies whenever this skill is active—whether you are the **main agent** in chat or running as **metacompressor-specialist** (subagent). The goal is shared rules so work is not duplicated and context is not lost across delegation.
 
-Skill evolution and boundaries: **`.cursor/skills/README.md`**. Product mandates and freeze zones: **`AGENTS.md`**. Session anchor and “after `git pull`” checklist: **`docs/METACOMPRESSOR_WORKING_CONTRACT.md`**.
+Skill evolution and boundaries: **`.cursor/skills/README.md`**. Product mandates and freeze zones: **`AGENTS.md`**. Session anchor and “after `git pull`” checklist: **`docs/policy/METACOMPRESSOR_WORKING_CONTRACT.md`**.
 
 ## Shared facts (both roles)
 

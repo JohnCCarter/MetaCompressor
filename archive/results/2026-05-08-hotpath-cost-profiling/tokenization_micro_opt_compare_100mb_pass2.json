@@ -1,0 +1,27 @@
+{
+  "after": {
+    "correctness_verify_time_ms": 154,
+    "determinism_verify_time_ms": 35649,
+    "output_size_bytes": 11819419,
+    "template_extract_time_ms": 58467,
+    "tokenization_time_ms": 45545
+  },
+  "before": {
+    "correctness_verify_time_ms": 125,
+    "determinism_verify_time_ms": 27907,
+    "output_size_bytes": 11819419,
+    "template_extract_time_ms": 41241,
+    "tokenization_time_ms": 33403
+  },
+  "correctness_ok": true,
+  "dataset": "structured_scale_100mb",
+  "delta_ms": {
+    "correctness_verify_time_ms": 29,
+    "determinism_verify_time_ms": 7742,
+    "template_extract_time_ms": 17226,
+    "tokenization_time_ms": 12142
+  },
+  "determinism_ok": true,
+  "output_size_equal": true,
+  "selected_mode": "corpus_template_columnar_v2"
+}

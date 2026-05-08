@@ -1,0 +1,120 @@
+{
+  "dataset_count": 10,
+  "losses_count": 0,
+  "near_ties_count": 0,
+  "phase": "phase5_product_benchmark_suite",
+  "source_report": "results/hardening/metacompressor_acceptance_hardening.json",
+  "summary_rows": [
+    {
+      "dataset": "structured_scale_10mb",
+      "fallback_triggered": false,
+      "mc_size": 1221906,
+      "ratio_delta_vs_tar_zstd_pct": -47.454,
+      "selected_mode": "corpus_template_columnar_v2",
+      "structured": true,
+      "tar_zstd_size": 2325411,
+      "type": "structured scale 10MB",
+      "verdict": "strong win"
+    },
+    {
+      "dataset": "structured_scale_50mb",
+      "fallback_triggered": false,
+      "mc_size": 5940129,
+      "ratio_delta_vs_tar_zstd_pct": -49.021,
+      "selected_mode": "corpus_template_columnar_v2",
+      "structured": true,
+      "tar_zstd_size": 11652180,
+      "type": "structured scale 50MB",
+      "verdict": "strong win"
+    },
+    {
+      "dataset": "structured_scale_100mb",
+      "fallback_triggered": false,
+      "mc_size": 11819419,
+      "ratio_delta_vs_tar_zstd_pct": -49.223,
+      "selected_mode": "corpus_template_columnar_v2",
+      "structured": true,
+      "tar_zstd_size": 23277190,
+      "type": "structured scale 100MB",
+      "verdict": "strong win"
+    },
+    {
+      "dataset": "app_service_logs",
+      "fallback_triggered": false,
+      "mc_size": 1455114,
+      "ratio_delta_vs_tar_zstd_pct": -47.786,
+      "selected_mode": "corpus_template_columnar_v2",
+      "structured": true,
+      "tar_zstd_size": 2786801,
+      "type": "app/service logs",
+      "verdict": "strong win"
+    },
+    {
+      "dataset": "json_ndjson_logs",
+      "fallback_triggered": false,
+      "mc_size": 1528432,
+      "ratio_delta_vs_tar_zstd_pct": -44.471,
+      "selected_mode": "corpus_template_columnar_v2",
+      "structured": true,
+      "tar_zstd_size": 2752514,
+      "type": "JSON/NDJSON",
+      "verdict": "strong win"
+    },
+    {
+      "dataset": "nginx_access_logs",
+      "fallback_triggered": false,
+      "mc_size": 658881,
+      "ratio_delta_vs_tar_zstd_pct": -71.999,
+      "selected_mode": "corpus_template_columnar_v2",
+      "structured": true,
+      "tar_zstd_size": 2353077,
+      "type": "nginx/access",
+      "verdict": "strong win"
+    },
+    {
+      "dataset": "mixed_microservice_logs",
+      "fallback_triggered": false,
+      "mc_size": 2334550,
+      "ratio_delta_vs_tar_zstd_pct": -45.475,
+      "selected_mode": "corpus_template_columnar_v2",
+      "structured": true,
+      "tar_zstd_size": 4281607,
+      "type": "mixed microservice logs",
+      "verdict": "strong win"
+    },
+    {
+      "dataset": "high_cardinality_logs",
+      "fallback_triggered": false,
+      "mc_size": 3286205,
+      "ratio_delta_vs_tar_zstd_pct": -12.334,
+      "selected_mode": "corpus_template_columnar_v2",
+      "structured": true,
+      "tar_zstd_size": 3748558,
+      "type": "high-cardinality logs",
+      "verdict": "strong win"
+    },
+    {
+      "dataset": "noisy_low_structure_logs",
+      "fallback_triggered": false,
+      "mc_size": 503427,
+      "ratio_delta_vs_tar_zstd_pct": -40.833,
+      "selected_mode": "corpus_template_columnar_v2",
+      "structured": false,
+      "tar_zstd_size": 850860,
+      "type": "noisy/low-structure logs",
+      "verdict": "strong win"
+    },
+    {
+      "dataset": "many_small_files_5000",
+      "fallback_triggered": false,
+      "mc_size": 65436,
+      "ratio_delta_vs_tar_zstd_pct": -39.9,
+      "selected_mode": "corpus_template_columnar_v2",
+      "structured": true,
+      "tar_zstd_size": 108879,
+      "type": "many-small-files corpus",
+      "verdict": "strong win"
+    }
+  ],
+  "wins_count": 10
+}

@@ -9,9 +9,10 @@ The repository mixes library code, tests, benchmarks, generated reports, and edi
 
 ## Decision
 
-1. Document placement rules in **`docs/repository-layout-policy.md`** and enforce them for humans and agents via **`.cursor/rules/metacompressor-layout.mdc`**.
+1. Document placement rules in **`docs/policy/repository-layout-policy.md`** and enforce them for humans and agents via **`.cursor/rules/metacompressor-layout.mdc`**.
 2. Add a **machine check** `scripts/check_repo_layout.py` that fails if any *git-tracked* `.py` file lies outside:
    - `metacompressor/*.py` (flat package; no `test_*.py` at package root),
+   - `metacompressor/differential/*.py` (single allowed nested subpackage; see amendment below),
    - `metacompressor/tests/**/*.py`,
    - `benchmarks/**/*.py`,
    - `scripts/**/*.py`.
@@ -22,3 +23,7 @@ The repository mixes library code, tests, benchmarks, generated reports, and edi
 - New Python modules **must** land under one of the allowed prefixes (or the check fails).
 - Introducing a **nested package** under `metacompressor/` (e.g. `metacompressor/foo/bar.py`) requires updating the checker and this ADR—intentional friction.
 - ADRs for future structural changes should reference whether the layout script needs updating.
+
+## Amendment (2026-05-08): `metacompressor/differential/`
+
+The **differential corpus** implementation ships as a **single-level** subpackage `metacompressor/differential/` (`__init__.py`, `core.py`, `orchestrator.py`, `persistence.py`). The layout checker allows **only** this prefix (no arbitrary deeper trees under `metacompressor/`). Further nested packages remain subject to the original friction rule above.

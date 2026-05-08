@@ -17,6 +17,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+import msgpack
+import zstandard as zstd
+
 from metacompressor.corpus import compress_corpus
 from metacompressor.corpus_template import compress_corpus_template_with_metrics
 from metacompressor.utils import CHUNK_SIZE
@@ -140,6 +143,16 @@ def compress_corpus_differential(
     runtime_validation_overhead_ms = 0
     runtime_reused_chunks = 0
     runtime_rebuilt_chunks = 0
+    mismatch_stage = "none"
+    mismatch_first_byte_offset = -1
+    candidate_size = 0
+    fresh_size = 0
+    size_delta = 0
+    container_metadata_equal: Optional[bool] = None
+    payload_order_equal: Optional[bool] = None
+    zstd_frame_equal: Optional[bool] = None
+    msgpack_structure_equal: Optional[bool] = None
+    suspected_global_dependency = False
 
     if old_manifest is not None and old_archive is not None and old_meta is not None:
         meta_ok = _meta_matches(old_meta, chunk_size, use_delta)
@@ -237,6 +250,7 @@ def compress_corpus_differential(
     fresh_archive = compress_corpus(
         input_dir, chunk_size=chunk_size, use_delta=use_delta
     )
+    fresh_size = len(fresh_archive)
 
     archives_equal: Optional[bool] = None
     if cache_hit_candidate:
@@ -274,6 +288,23 @@ def compress_corpus_differential(
         )
         parity_ok = verification_candidate == fresh_archive
         byte_identical_parity_pass = bool(parity_ok)
+        verification_diag = _diagnose_runtime_parity_mismatch(
+            verification_candidate, fresh_archive
+        )
+        mismatch_stage = str(verification_diag["mismatch_stage"])
+        mismatch_first_byte_offset = int(
+            verification_diag["mismatch_first_byte_offset"]
+        )
+        candidate_size = int(verification_diag["candidate_size"])
+        fresh_size = int(verification_diag["fresh_size"])
+        size_delta = int(verification_diag["size_delta"])
+        container_metadata_equal = verification_diag["container_metadata_equal"]
+        payload_order_equal = verification_diag["payload_order_equal"]
+        zstd_frame_equal = verification_diag["zstd_frame_equal"]
+        msgpack_structure_equal = verification_diag["msgpack_structure_equal"]
+        suspected_global_dependency = bool(
+            verification_diag["suspected_global_dependency"]
+        )
         if not parity_ok:
             fail_closed = True
             reason = "byte_parity_mismatch"
@@ -327,6 +358,24 @@ def compress_corpus_differential(
                     runtime_substitution_candidate_equal_fresh = (
                         runtime_archive_candidate == fresh_archive
                     )
+                    if runtime_archive_candidate is not None:
+                        diag = _diagnose_runtime_parity_mismatch(
+                            runtime_archive_candidate, fresh_archive
+                        )
+                        mismatch_stage = str(diag["mismatch_stage"])
+                        mismatch_first_byte_offset = int(
+                            diag["mismatch_first_byte_offset"]
+                        )
+                        candidate_size = int(diag["candidate_size"])
+                        fresh_size = int(diag["fresh_size"])
+                        size_delta = int(diag["size_delta"])
+                        container_metadata_equal = diag["container_metadata_equal"]
+                        payload_order_equal = diag["payload_order_equal"]
+                        zstd_frame_equal = diag["zstd_frame_equal"]
+                        msgpack_structure_equal = diag["msgpack_structure_equal"]
+                        suspected_global_dependency = bool(
+                            diag["suspected_global_dependency"]
+                        )
                     if not runtime_substitution_candidate_equal_fresh:
                         fail_closed = True
                         reason = "runtime_substitution_parity_mismatch"
@@ -402,6 +451,18 @@ def compress_corpus_differential(
                 "runtime_validation_overhead_ms": int(runtime_validation_overhead_ms),
                 "runtime_substitution_reused_chunks": int(runtime_reused_chunks),
                 "runtime_substitution_rebuilt_chunks": int(runtime_rebuilt_chunks),
+                "mismatch_stage": mismatch_stage,
+                "mismatch_first_byte_offset": int(mismatch_first_byte_offset),
+                "candidate_size": int(candidate_size),
+                "fresh_size": int(fresh_size),
+                "size_delta": int(size_delta),
+                "artifact_count_reused": int(runtime_reused_chunks),
+                "artifact_count_rebuilt": int(runtime_rebuilt_chunks),
+                "container_metadata_equal": container_metadata_equal,
+                "payload_order_equal": payload_order_equal,
+                "zstd_frame_equal": zstd_frame_equal,
+                "msgpack_structure_equal": msgpack_structure_equal,
+                "suspected_global_dependency": bool(suspected_global_dependency),
             }
         )
     return DifferentialCompressResult(archive=fresh_archive, report=report)
@@ -655,6 +716,137 @@ def _build_runtime_substitution_candidate(
             return runtime_archive, None, replay_deterministic
     except Exception:
         return None, "runtime_replay_nondeterministic", None
+
+
+def _first_mismatch_offset(a: bytes, b: bytes) -> int:
+    limit = min(len(a), len(b))
+    for i in range(limit):
+        if a[i] != b[i]:
+            return i
+    if len(a) != len(b):
+        return limit
+    return -1
+
+
+def _msgpack_structure_signature(value: Any) -> Any:
+    if isinstance(value, dict):
+        return (
+            "dict",
+            tuple(
+                (
+                    str(k),
+                    _msgpack_structure_signature(v),
+                )
+                for k, v in sorted(value.items(), key=lambda item: str(item[0]))
+            ),
+        )
+    if isinstance(value, list):
+        return ("list", tuple(_msgpack_structure_signature(v) for v in value))
+    if isinstance(value, bytes):
+        return ("bytes", len(value))
+    return type(value).__name__
+
+
+def _extract_container_views(data: bytes) -> Dict[str, Any]:
+    view: Dict[str, Any] = {
+        "magic": bytes(data[:4]) if len(data) >= 4 else b"",
+        "version": int(data[4]) if len(data) >= 5 else -1,
+        "compressed_payload": bytes(data[5:]) if len(data) > 5 else b"",
+        "raw_payload": None,
+        "msgpack_obj": None,
+        "container_metadata": None,
+        "payload_order": None,
+    }
+    if len(data) < 6:
+        return view
+    try:
+        raw_payload = zstd.ZstdDecompressor().decompress(view["compressed_payload"])
+        view["raw_payload"] = raw_payload
+        obj = msgpack.unpackb(raw_payload, raw=False)
+        view["msgpack_obj"] = obj
+        if isinstance(obj, dict):
+            files = obj.get("files", [])
+            if isinstance(files, list):
+                payload_order = []
+                for entry in files:
+                    if isinstance(entry, dict):
+                        payload_order.append(
+                            (
+                                str(entry.get("path", "")),
+                                tuple(int(x) for x in entry.get("sequence", [])),
+                            )
+                        )
+                view["payload_order"] = tuple(payload_order)
+            view["container_metadata"] = {
+                "magic": view["magic"],
+                "version": view["version"],
+                "chunk_size": obj.get("chunk_size"),
+                "has_chunks_blob": "chunks_blob" in obj,
+                "has_chunks_blob_z": "chunks_blob_z" in obj,
+                "has_zstd_dict": "zstd_dict" in obj,
+                "delta_chunks_count": (
+                    len(obj.get("delta_chunks", []))
+                    if isinstance(obj.get("delta_chunks", []), list)
+                    else -1
+                ),
+                "files_count": (
+                    len(obj.get("files", []))
+                    if isinstance(obj.get("files", []), list)
+                    else -1
+                ),
+            }
+    except Exception:
+        return view
+    return view
+
+
+def _diagnose_runtime_parity_mismatch(candidate: bytes, fresh: bytes) -> Dict[str, Any]:
+    candidate_view = _extract_container_views(candidate)
+    fresh_view = _extract_container_views(fresh)
+    first_mismatch = _first_mismatch_offset(candidate, fresh)
+    zstd_frame_equal = (
+        candidate_view["compressed_payload"] == fresh_view["compressed_payload"]
+    )
+    container_metadata_equal = (
+        candidate_view["container_metadata"] == fresh_view["container_metadata"]
+    )
+    payload_order_equal = candidate_view["payload_order"] == fresh_view["payload_order"]
+    msgpack_structure_equal = _msgpack_structure_signature(
+        candidate_view["msgpack_obj"]
+    ) == _msgpack_structure_signature(fresh_view["msgpack_obj"])
+    suspected_global_dependency = bool(
+        zstd_frame_equal is False
+        or container_metadata_equal is False
+        or payload_order_equal is False
+    )
+    mismatch_stage = "none"
+    if candidate != fresh:
+        if 0 <= first_mismatch < 5:
+            mismatch_stage = "container_header"
+        elif zstd_frame_equal is False and msgpack_structure_equal is True:
+            mismatch_stage = "zstd_frame"
+        elif container_metadata_equal is False:
+            mismatch_stage = "container_metadata"
+        elif payload_order_equal is False:
+            mismatch_stage = "payload_order"
+        elif msgpack_structure_equal is False:
+            mismatch_stage = "msgpack_structure"
+        elif suspected_global_dependency:
+            mismatch_stage = "archive_global_dependency"
+        else:
+            mismatch_stage = "unknown_payload"
+    return {
+        "mismatch_stage": mismatch_stage,
+        "mismatch_first_byte_offset": int(first_mismatch),
+        "candidate_size": int(len(candidate)),
+        "fresh_size": int(len(fresh)),
+        "size_delta": int(len(candidate) - len(fresh)),
+        "container_metadata_equal": container_metadata_equal,
+        "payload_order_equal": payload_order_equal,
+        "zstd_frame_equal": zstd_frame_equal,
+        "msgpack_structure_equal": msgpack_structure_equal,
+        "suspected_global_dependency": suspected_global_dependency,
+    }
 
 
 def _compute_real_decision_metadata(input_dir: Path) -> Optional[Dict[str, Any]]:

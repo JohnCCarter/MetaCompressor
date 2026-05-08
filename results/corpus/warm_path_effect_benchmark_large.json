@@ -1,0 +1,50 @@
+{
+  "cold_quick": {
+    "analysis_skip_denied_reason": "stale_or_missing_receipt",
+    "analysis_skip_eligible": false,
+    "analysis_skip_used": false,
+    "bounded_scan_time_ms": 75,
+    "total_quick_time_ms": 21409,
+    "warm_path_saved_estimate_ms": 0
+  },
+  "low_confidence": {
+    "analysis_skip_denied_reason": "low_confidence",
+    "analysis_skip_eligible": false,
+    "analysis_skip_used": false,
+    "bounded_scan_time_ms": 250,
+    "total_quick_time_ms": 28941,
+    "warm_path_saved_estimate_ms": 0
+  },
+  "metadata_mismatch": {
+    "analysis_skip_denied_reason": "receipt_metadata_mismatch",
+    "analysis_skip_eligible": false,
+    "analysis_skip_used": false,
+    "bounded_scan_time_ms": 84,
+    "total_quick_time_ms": 32027,
+    "warm_path_saved_estimate_ms": 0
+  },
+  "stale_receipt": {
+    "analysis_skip_denied_reason": "stale_or_missing_receipt",
+    "analysis_skip_eligible": false,
+    "analysis_skip_used": false,
+    "bounded_scan_time_ms": 204,
+    "total_quick_time_ms": 27710,
+    "warm_path_saved_estimate_ms": 0
+  },
+  "warm_quick_changed": {
+    "analysis_skip_denied_reason": "stale_or_missing_receipt",
+    "analysis_skip_eligible": false,
+    "analysis_skip_used": false,
+    "bounded_scan_time_ms": 235,
+    "total_quick_time_ms": 23959,
+    "warm_path_saved_estimate_ms": 0
+  },
+  "warm_quick_unchanged": {
+    "analysis_skip_denied_reason": "",
+    "analysis_skip_eligible": true,
+    "analysis_skip_used": true,
+    "bounded_scan_time_ms": 0,
+    "total_quick_time_ms": 22487,
+    "warm_path_saved_estimate_ms": 75
+  }
+}\n

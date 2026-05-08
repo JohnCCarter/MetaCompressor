@@ -54,7 +54,7 @@ def compress_corpus(
         chunks.  Defaults to ``False`` because the similarity scan is
         expensive (pure-Python byte comparison across up to MAX_CANDIDATES
         recent chunks) and yields no measurable ratio benefit on diverse
-        corpora (see ``results/delta_benchmark.md``).  Enable explicitly when
+        corpora (see ``results/corpus/delta_benchmark.md``).  Enable explicitly when
         the corpus is known to contain many same-length near-duplicate
         chunks (e.g. binary diffs, snapshot series).
 

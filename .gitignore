@@ -220,3 +220,10 @@ __marimo__/
 # MetaCompressor — local CLI / benchmark scratch (do not commit)
 mc_test_output/
 tmp_metacompressor_test/
+tmp_wheels/
+# Prefer repo-local tmp/ for scratch (contents ignored except README + .gitkeep)
+tmp/*
+!tmp/.gitkeep
+!tmp/README.md
+# Scratch / profiling scripts at repo root (per docs/policy/repository-layout-policy.md)
+tmp_*

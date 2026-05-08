@@ -50,7 +50,7 @@ def compress(
         chunks.  Defaults to ``False`` because the similarity scan is
         O(MAX_CANDIDATES × chunk_len) of pure-Python work per new chunk and
         yields no measurable ratio benefit on diverse data (see
-        ``results/delta_benchmark.md``).  Enable explicitly for corpora with
+        ``results/corpus/delta_benchmark.md``).  Enable explicitly for corpora with
         many same-length near-duplicate chunks.
     """
     if chunking_mode not in (CHUNKING_FIXED, CHUNKING_CDC):

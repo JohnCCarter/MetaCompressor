@@ -1,0 +1,49 @@
+{
+  "dataset": "structured_scale_100mb",
+  "ranked_substeps": [
+    [
+      "tokenization_time_ms",
+      39352
+    ],
+    [
+      "template_grouping_time_ms",
+      941
+    ],
+    [
+      "template_hash_time_ms",
+      560
+    ],
+    [
+      "line_split_time_ms",
+      451
+    ],
+    [
+      "template_cache_lookup_time_ms",
+      224
+    ],
+    [
+      "placeholder_detection_time_ms",
+      146
+    ],
+    [
+      "pattern_match_time_ms",
+      0
+    ]
+  ],
+  "template_extract_counters": {
+    "lines_scanned": 413239,
+    "regex_match_count": 5031174,
+    "templates_created": 398895,
+    "tokens_scanned": 5031174
+  },
+  "template_extract_substeps_ms": {
+    "line_split_time_ms": 451,
+    "pattern_match_time_ms": 0,
+    "placeholder_detection_time_ms": 146,
+    "template_cache_lookup_time_ms": 224,
+    "template_grouping_time_ms": 941,
+    "template_hash_time_ms": 560,
+    "tokenization_time_ms": 39352
+  },
+  "template_extract_time_ms": 51306
+}

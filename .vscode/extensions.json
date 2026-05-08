@@ -1,0 +1,4 @@
+{
+  "recommendations": ["anysphere.cursorpyright", "ms-python.python"],
+  "unwantedRecommendations": ["ms-python.vscode-pylance"]
+}

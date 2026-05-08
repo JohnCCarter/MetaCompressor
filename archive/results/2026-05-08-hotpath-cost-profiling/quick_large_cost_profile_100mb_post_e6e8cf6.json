@@ -1,0 +1,86 @@
+{
+  "commit": "e6e8cf6",
+  "dataset": "structured_scale_100mb",
+  "median": {
+    "mc_selected_build_time_ms": 144832,
+    "output_size_bytes": 11819419,
+    "template_cache_lookup_time_ms": 191,
+    "template_extract_time_ms": 60540,
+    "template_grouping_time_ms": 1000,
+    "template_hash_time_ms": 739,
+    "tokenization_time_ms": 41515,
+    "transform_call_time_ms": 126701
+  },
+  "ranked_medians": [
+    [
+      "mc_selected_build_time_ms",
+      144832
+    ],
+    [
+      "transform_call_time_ms",
+      126701
+    ],
+    [
+      "template_extract_time_ms",
+      60540
+    ],
+    [
+      "tokenization_time_ms",
+      41515
+    ],
+    [
+      "template_grouping_time_ms",
+      1000
+    ],
+    [
+      "template_hash_time_ms",
+      739
+    ],
+    [
+      "template_cache_lookup_time_ms",
+      191
+    ]
+  ],
+  "replicates": 3,
+  "runs": [
+    {
+      "mc_selected_build_time_ms": 157372,
+      "output_size_bytes": 11819419,
+      "replicate": 1,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 274,
+      "template_extract_time_ms": 72307,
+      "template_grouping_time_ms": 1162,
+      "template_hash_time_ms": 919,
+      "tokenization_time_ms": 54282,
+      "transform_call_time_ms": 137118
+    },
+    {
+      "mc_selected_build_time_ms": 119124,
+      "output_size_bytes": 11819419,
+      "replicate": 2,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 191,
+      "template_extract_time_ms": 43660,
+      "template_grouping_time_ms": 1000,
+      "template_hash_time_ms": 739,
+      "tokenization_time_ms": 41515,
+      "transform_call_time_ms": 99324
+    },
+    {
+      "mc_selected_build_time_ms": 144832,
+      "output_size_bytes": 11819419,
+      "replicate": 3,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 187,
+      "template_extract_time_ms": 60540,
+      "template_grouping_time_ms": 893,
+      "template_hash_time_ms": 685,
+      "tokenization_time_ms": 39643,
+      "transform_call_time_ms": 126701
+    }
+  ],
+  "selected_mode_set": [
+    "corpus_template_columnar_v2"
+  ]
+}

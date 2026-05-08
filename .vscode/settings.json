@@ -1,11 +1,62 @@
 {
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+
   "python.testing.pytestArgs": ["metacompressor/tests"],
+
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,
+
+  // ms-python.python: "None" turns off both Pylance and Jedi (the only LS modes in that extension).
+  // IntelliSense / diagnostics: anysphere.cursorpyright (Pyright-based).
+  "python.languageServer": "None",
+
+  "cursorpyright.shouldImportPylanceSettings": "always",
+  "cursorpyright.disableLanguageServices": false,
+  "cursorpyright.analysis.diagnosticMode": "openFilesOnly",
+  "cursorpyright.analysis.typeCheckingMode": "off",
+  "cursorpyright.analysis.autoImportCompletions": false,
+  "cursorpyright.analysis.useLibraryCodeForTypes": false,
+  "cursorpyright.analysis.disableWorkspaceSymbol": true,
+  "cursorpyright.disableTaggedHints": true,
+  "cursorpyright.analysis.exclude": [
+    "**/.venv/**",
+    "**/results/**",
+    "**/mc_test_output/**",
+    "**/tmp_*",
+    "**/__pycache__/**",
+    "**/.git/**",
+    "**/build/**",
+    "**/dist/**"
+  ],
+  "cursorpyright.analysis.ignore": [
+    "**/.venv/**",
+    "**/results/**",
+    "**/mc_test_output/**",
+    "**/tmp_*"
+  ],
+
   "terminal.sourceControlRepositoriesKind": "integrated",
+
   "scm.alwaysShowActions": true,
   "scm.alwaysShowRepositories": true,
+  "scm.workingSets.enabled": true,
+
   "git.showCursorWorktrees": true,
-  "scm.workingSets.enabled": true
+
+  "cursor.general.gitGraphIndexing": "enabled",
+
+  "cursor.general.enableCodebaseIndexing": true,
+  "cursor.indexing.codebaseIndexing.enabled": true,
+  "cursor.indexing.codebaseIndexing.allowGitignore": true,
+  "cursor.indexing.codebaseIndexing.allowCursorignore": true,
+  "cursor.indexing.codebaseIndexing.allowWorkspaceIgnore": true,
+  "cursor.indexing.codebaseIndexing.allowWorkspaceIgnorePatterns": [
+    "**/.git",
+    "**/.svn",
+    "**/.hg",
+    "**/.DS_Store",
+    "**/.Thumbs.db"
+  ],
+  "python.terminal.activateEnvInCurrentTerminal": true,
+  "python.terminal.useEnvFile": true
 }

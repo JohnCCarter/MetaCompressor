@@ -1,0 +1,66 @@
+{
+  "average_ms": {
+    "baseline_tar_zstd_time_ms": 0,
+    "correctness_verify_time_ms": 0,
+    "determinism_verify_time_ms": 0,
+    "mc_selected_build_time_ms": 0,
+    "template_extract_time_ms": 0,
+    "transform_call_time_ms": 0
+  },
+  "datasets_used": [
+    {
+      "baseline_tar_zstd_time_ms": 0,
+      "correctness_verify_time_ms": 0,
+      "determinism_verify_time_ms": 0,
+      "mc_selected_build_time_ms": 0,
+      "name": "structured_scale_100mb",
+      "template_extract_time_ms": 0,
+      "transform_call_time_ms": 0
+    },
+    {
+      "baseline_tar_zstd_time_ms": 0,
+      "correctness_verify_time_ms": 0,
+      "determinism_verify_time_ms": 0,
+      "mc_selected_build_time_ms": 0,
+      "name": "many_small_files_5000",
+      "template_extract_time_ms": 0,
+      "transform_call_time_ms": 0
+    },
+    {
+      "baseline_tar_zstd_time_ms": 0,
+      "correctness_verify_time_ms": 0,
+      "determinism_verify_time_ms": 0,
+      "mc_selected_build_time_ms": 0,
+      "name": "structured_scale_250mb",
+      "template_extract_time_ms": 0,
+      "transform_call_time_ms": 0
+    }
+  ],
+  "ranked_average_ms": [
+    [
+      "mc_selected_build_time_ms",
+      0
+    ],
+    [
+      "template_extract_time_ms",
+      0
+    ],
+    [
+      "transform_call_time_ms",
+      0
+    ],
+    [
+      "determinism_verify_time_ms",
+      0
+    ],
+    [
+      "correctness_verify_time_ms",
+      0
+    ],
+    [
+      "baseline_tar_zstd_time_ms",
+      0
+    ]
+  ],
+  "source": "results\\metacompressor_acceptance_hardening.json"
+}

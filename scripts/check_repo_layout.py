@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail if tracked Python files sit outside allowed layout (see docs/repository-layout-policy.md)."""
+"""Fail if tracked Python files sit outside allowed layout (see docs/policy/repository-layout-policy.md)."""
 
 from __future__ import annotations
 
@@ -27,6 +27,16 @@ def is_allowed(path: str) -> bool:
     if p.startswith("scripts/"):
         return True
     if p.startswith("metacompressor/tests/"):
+        return True
+
+    # Single nested subpackage: differential corpus path (cohesive modules; see
+    # docs/policy/repository-layout-policy.md and ADR 0001 amendment). No deeper trees.
+    if p.startswith("metacompressor/differential/") and p.endswith(".py"):
+        inner = p[len("metacompressor/differential/") :]
+        if "/" in inner or not inner:
+            return False
+        if inner.startswith("test_"):
+            return False
         return True
 
     if not p.startswith("metacompressor/") or not p.endswith(".py"):
@@ -57,10 +67,11 @@ def main() -> int:
         print(
             "\nAllowed:\n"
             "  - metacompressor/<module>.py  (flat package; not test_*.py)\n"
+            "  - metacompressor/differential/<module>.py  (single nested subpackage)\n"
             "  - metacompressor/tests/**.py\n"
             "  - benchmarks/**\n"
             "  - scripts/**\n"
-            "\nSee docs/repository-layout-policy.md and docs/adr/README.md.",
+            "\nSee docs/policy/repository-layout-policy.md and docs/adr/README.md.",
             file=sys.stderr,
         )
         return 1

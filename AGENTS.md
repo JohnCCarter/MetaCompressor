@@ -1,6 +1,6 @@
 # AGENTS.md — Agent governance (MetaCompressor)
 
-## Last update: 2026-05-04
+## Last update: 2026-05-08
 
 This file is the **stable governance layer** for any automated or semi-automated agent working in this repository (e.g. Cursor Agent, subagents, future CI agents). It defines **boundaries and authority**—not day-to-day tactics.
 
@@ -12,7 +12,7 @@ It is **not** a substitute for `pyproject.toml`, tests, or the repository layout
 |--------|------|
 | **`AGENTS.md`** (this file) | Stable mandates: what agents must not break, how conflicts are ordered, freeze-sensitive areas. |
 | **`docs/adr/*.md`** | Recorded **architecture decisions**; supersede informal habit when they explicitly decide structure or behavior. |
-| **`docs/repository-layout-policy.md`** | Where files belong, naming and splitting conventions. |
+| **`docs/policy/repository-layout-policy.md`** | Where files belong, naming and splitting conventions. |
 | **`.cursor/rules/*.mdc`** | Editor/agent **constraints** (always-on or scoped); operational but subordinate to this file and ADRs. |
 | **`.cursor/skills/*/SKILL.md`** | **On-demand workflows** (how to run checks, delegate subagents, etc.). **Not** a runtime execution surface and **not** a source of product truth. Governance charter: **`.cursor/skills/README.md`**. |
 | **`benchmarks/`** + **`results/`** | Validation and **reports**; they do **not** override unit-test contracts in `metacompressor/tests/`. |
@@ -74,7 +74,7 @@ Cursor **skills** and **rules** must **not** be used to bypass these constraints
 
 - Preconditions and validation steps (e.g. run `pytest`, `ruff`, `black`).
 - Review checklists and handoff patterns between main agent and subagents.
-- Links to `docs/repository-layout-policy.md` and ADRs.
+- Links to `docs/policy/repository-layout-policy.md` and ADRs.
 
 All such content remains **subordinate** to this file and to **accepted ADRs**.
 
@@ -95,8 +95,8 @@ When documents or instructions conflict, use this order **from strongest to weak
 2. **`pyproject.toml`** — dependencies, entrypoints, declared tooling config.
 3. **Accepted `docs/adr/*.md`** — decisions explicitly marked accepted that bear on the conflict.
 4. **`AGENTS.md`** (this file).
-5. **`docs/METACOMPRESSOR_WORKING_CONTRACT.md`** — working anchor and stay-current checklist (must not contradict this file).
-6. **`docs/repository-layout-policy.md`** — file placement and structure.
+5. **`docs/policy/METACOMPRESSOR_WORKING_CONTRACT.md`** — working anchor and stay-current checklist (must not contradict this file).
+6. **`docs/policy/repository-layout-policy.md`** — file placement and structure.
 7. **`.cursor/rules/*.mdc`** — operational agent rules.
 8. **`.cursor/skills/*/SKILL.md`** — optional workflows.
 
@@ -106,8 +106,8 @@ When documents or instructions conflict, use this order **from strongest to weak
 
 - `README.md`
 - `pyproject.toml`
-- **`docs/METACOMPRESSOR_WORKING_CONTRACT.md`** — rolling anchor / checklist for staying current (subordinate to this file).
-- `docs/repository-layout-policy.md`
+- **`docs/policy/METACOMPRESSOR_WORKING_CONTRACT.md`** — rolling anchor / checklist for staying current (subordinate to this file).
+- `docs/policy/repository-layout-policy.md`
 - `docs/adr/README.md`
 - `.cursor/rules/`
 - `.cursor/skills/` (see **`.cursor/skills/README.md`** — skill charter)

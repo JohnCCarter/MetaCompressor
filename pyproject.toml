@@ -36,7 +36,7 @@ native = [
 mc = "metacompressor.cli:main"
 
 [tool.setuptools.packages.find]
-exclude = ["results*", "mc_test_output*", "tmp_metacompressor_test*", "scripts*"]
+exclude = ["results*", "mc_test_output*", "tmp_metacompressor_test*", "scripts*", "benchmarks*"]
 
 [tool.pytest.ini_options]
 testpaths = ["metacompressor/tests"]
@@ -57,7 +57,7 @@ select = ["E", "F", "I", "W"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-"benchmarks/*.py" = ["E731"]
+"benchmarks/**/*.py" = ["E731", "E402"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -66,4 +66,4 @@ quote-style = "double"
 line-length = 88
 target-version = ["py39"]
 # Exclude generated/local trees; keep in sync with layout policy hygiene zones.
-extend-exclude = "/(results|mc_test_output|tmp_metacompressor_test|\\.venv|build|dist)/"
+extend-exclude = "/(results|tmp|mc_test_output|tmp_metacompressor_test|\\.venv|build|dist)/"

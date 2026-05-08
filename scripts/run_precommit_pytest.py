@@ -14,8 +14,8 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     os.chdir(root)
     os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
-    # Stress/hardening suites write Markdown under results/; redirect so pre-commit does not
-    # see dirty tracked files (see metacompressor/tests/test_stress_suite.py).
+    # Stress/hardening suites write Markdown under results/hardening/; redirect so pre-commit does not
+    # see dirty tracked files (see metacompressor/tests/stress/test_stress_suite.py).
     if "METACOMPRESSOR_TEST_RESULTS_DIR" not in os.environ:
         os.environ["METACOMPRESSOR_TEST_RESULTS_DIR"] = tempfile.mkdtemp(
             prefix="mc_precommit_results_",

@@ -1,0 +1,37 @@
+{
+  "costs_ms": {
+    "baseline_tar_zstd_time_ms": 1715,
+    "correctness_verify_time_ms": 139,
+    "determinism_verify_time_ms": 52359,
+    "mc_selected_build_time_ms": 570663,
+    "template_extract_time_ms": 273411,
+    "transform_call_time_ms": 554134
+  },
+  "dataset": "structured_scale_100mb",
+  "ranked": [
+    [
+      "mc_selected_build_time_ms",
+      570663
+    ],
+    [
+      "transform_call_time_ms",
+      554134
+    ],
+    [
+      "template_extract_time_ms",
+      273411
+    ],
+    [
+      "determinism_verify_time_ms",
+      52359
+    ],
+    [
+      "baseline_tar_zstd_time_ms",
+      1715
+    ],
+    [
+      "correctness_verify_time_ms",
+      139
+    ]
+  ]
+}

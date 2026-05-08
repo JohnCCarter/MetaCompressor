@@ -12,7 +12,7 @@ alwaysApply: false
 
 - Prefer **round-trip** helpers (`compress` → `decompress`) for behavioral tests unless you are explicitly testing failure modes.
 - Respect pytest **markers** (`small`, `medium`, `large`); do not assume `large` runs in CI without `RUN_LARGE_TESTS=1`.
-- Reuse patterns from `conftest.py` and existing files in the same directory.
+- Reuse patterns from **`conftest.py`** at `metacompressor/tests/conftest.py` and neighbouring `test_*.py` files in the same **domain folder** (`core/`, `corpus/`, `differential/`, `validation/`, `stress/`).
 
 ## Benchmarks (`benchmarks/`)
 

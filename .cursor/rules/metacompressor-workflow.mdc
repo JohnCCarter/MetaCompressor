@@ -5,7 +5,7 @@ alwaysApply: true
 
 # MetaCompressor — agent rules
 
-Governance and authority order: see **`AGENTS.md`** at repo root (freeze zones, skills vs constitution). **Stay current:** skim **`docs/METACOMPRESSOR_WORKING_CONTRACT.md`** after pulls or when `Last update` changed.
+Governance and authority order: see **`AGENTS.md`** at repo root (freeze zones, skills vs constitution). **Stay current:** skim **`docs/policy/METACOMPRESSOR_WORKING_CONTRACT.md`** after pulls or when `Last update` changed.
 
 ## Product
 
@@ -24,7 +24,7 @@ Deterministic **lossless** compression: raw bytes ↔ `.mc1` via chunking (fixed
 - Format (CI): `black --check metacompressor scripts benchmarks` — use **Black** as canonical formatter; avoid mixing `ruff format` on the same files in one pass.
 - Pre-commit: `pre-commit install && pre-commit install --hook-type pre-push` then `pre-commit run --all-files` (commit hooks: ruff, black, whitespace) and `pre-commit run --all-files --hook-stage pre-push` (full pytest; writes reports under a temp dir via `METACOMPRESSOR_TEST_RESULTS_DIR`).
 - Fast tests: `python -m pytest metacompressor/tests -q`
-- One module: `python -m pytest metacompressor/tests/test_compressor.py -q`
+- One module: `python -m pytest metacompressor/tests/core/test_compressor.py -q`
 - Markers: use `-m small` by default; `medium` / `large` only when needed (`RUN_LARGE_TESTS` for large). See `pyproject.toml` `[tool.pytest.ini_options]`.
 - CLI after editable install: `pip install -e .` then `mc --help`.
 

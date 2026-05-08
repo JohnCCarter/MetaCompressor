@@ -1,0 +1,57 @@
+{
+  "commit": "5d2bdae",
+  "dataset": "structured_scale_100mb",
+  "median": {
+    "mc_selected_build_time_ms": 118816,
+    "output_size_bytes": 11819419,
+    "template_cache_lookup_time_ms": 164,
+    "template_extract_time_ms": 45930,
+    "template_grouping_time_ms": 700,
+    "template_hash_time_ms": 490,
+    "tokenization_time_ms": 31776,
+    "transform_call_time_ms": 102488
+  },
+  "phase": "before",
+  "replicates": 3,
+  "runs": [
+    {
+      "mc_selected_build_time_ms": 120315,
+      "output_size_bytes": 11819419,
+      "replicate": 1,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 179,
+      "template_extract_time_ms": 49667,
+      "template_grouping_time_ms": 886,
+      "template_hash_time_ms": 612,
+      "tokenization_time_ms": 38765,
+      "transform_call_time_ms": 104013
+    },
+    {
+      "mc_selected_build_time_ms": 118816,
+      "output_size_bytes": 11819419,
+      "replicate": 2,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 164,
+      "template_extract_time_ms": 39609,
+      "template_grouping_time_ms": 700,
+      "template_hash_time_ms": 490,
+      "tokenization_time_ms": 31776,
+      "transform_call_time_ms": 102488
+    },
+    {
+      "mc_selected_build_time_ms": 114782,
+      "output_size_bytes": 11819419,
+      "replicate": 3,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 153,
+      "template_extract_time_ms": 45930,
+      "template_grouping_time_ms": 684,
+      "template_hash_time_ms": 488,
+      "tokenization_time_ms": 31494,
+      "transform_call_time_ms": 99749
+    }
+  ],
+  "selected_mode_set": [
+    "corpus_template_columnar_v2"
+  ]
+}

@@ -31,7 +31,7 @@ You run inside Cursor Agent with the **same tool surface as the parent agent** (
 **Default commands (Windows or POSIX):**
 
 - Full unit suite (fast): `python -m pytest metacompressor/tests -q`
-- One file: `python -m pytest metacompressor/tests/test_compressor.py -q`
+- One file: `python -m pytest metacompressor/tests/core/test_compressor.py -q`
 - Respecting markers: use `-m small` unless the task needs `medium` / `large` (see `pyproject.toml`).
 - CLI smoke: `mc --help` (after editable install: `pip install -e .`).
 

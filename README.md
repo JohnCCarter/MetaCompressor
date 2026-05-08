@@ -39,10 +39,10 @@ Use extra caution (and compare against TAR+ZSTD baseline) for:
 
 Evidence references:
 
-- product benchmark summary: `results/phase5_product_benchmark_suite.md`
-- hotpath optimization summary: `docs/template-hotpath-optimization-summary.md`
-- adoption plan: `docs/phase6-adoption-mode-plan.md`
+- product benchmark summary: `results/phases/phase5_product_benchmark_suite.md`
+- hotpath optimization summary: `docs/planning/template-hotpath-optimization-summary.md`
+- adoption plan: `docs/planning/phase6-adoption-mode-plan.md`
 
 ## Repository layout
 
-**Working contract (stay current):** **[docs/METACOMPRESSOR_WORKING_CONTRACT.md](docs/METACOMPRESSOR_WORKING_CONTRACT.md)**. Governance: **[AGENTS.md](AGENTS.md)**. Layout: **[docs/repository-layout-policy.md](docs/repository-layout-policy.md)**. ADRs: **[docs/adr/](docs/adr/README.md)**. CI: **`.github/workflows/ci.yml`**.
+**Working contract (stay current):** **[docs/policy/METACOMPRESSOR_WORKING_CONTRACT.md](docs/policy/METACOMPRESSOR_WORKING_CONTRACT.md)**. Governance: **[AGENTS.md](AGENTS.md)**. Layout: **[docs/policy/repository-layout-policy.md](docs/policy/repository-layout-policy.md)**. ADRs: **[docs/adr/](docs/adr/README.md)**. CI: **`.github/workflows/ci.yml`**.

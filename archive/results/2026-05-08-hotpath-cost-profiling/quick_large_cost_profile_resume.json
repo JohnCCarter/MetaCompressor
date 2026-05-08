@@ -1,0 +1,70 @@
+{
+  "average_ms": {
+    "baseline_tar_zstd_time_ms": 17741,
+    "correctness_verify_time_ms": 917,
+    "determinism_verify_time_ms": 182465,
+    "mc_selected_build_time_ms": 407786,
+    "template_extract_time_ms": 95835,
+    "transform_call_time_ms": 256277
+  },
+  "fields": [
+    "mc_selected_build_time_ms",
+    "template_extract_time_ms",
+    "transform_call_time_ms",
+    "determinism_verify_time_ms",
+    "correctness_verify_time_ms",
+    "baseline_tar_zstd_time_ms"
+  ],
+  "per_case_ms": {
+    "many_small_files_5000": {
+      "baseline_tar_zstd_time_ms": 46189,
+      "correctness_verify_time_ms": 1973,
+      "determinism_verify_time_ms": 2792,
+      "mc_selected_build_time_ms": 21167,
+      "template_extract_time_ms": 5687,
+      "transform_call_time_ms": 11077
+    },
+    "structured_scale_100mb": {
+      "baseline_tar_zstd_time_ms": 2458,
+      "correctness_verify_time_ms": 157,
+      "determinism_verify_time_ms": 41522,
+      "mc_selected_build_time_ms": 170749,
+      "template_extract_time_ms": 66589,
+      "transform_call_time_ms": 148612
+    },
+    "structured_scale_250mb": {
+      "baseline_tar_zstd_time_ms": 4577,
+      "correctness_verify_time_ms": 621,
+      "determinism_verify_time_ms": 503082,
+      "mc_selected_build_time_ms": 1031442,
+      "template_extract_time_ms": 215231,
+      "transform_call_time_ms": 609144
+    }
+  },
+  "ranked_average_ms": [
+    [
+      "mc_selected_build_time_ms",
+      407786
+    ],
+    [
+      "transform_call_time_ms",
+      256277
+    ],
+    [
+      "determinism_verify_time_ms",
+      182465
+    ],
+    [
+      "template_extract_time_ms",
+      95835
+    ],
+    [
+      "baseline_tar_zstd_time_ms",
+      17741
+    ],
+    [
+      "correctness_verify_time_ms",
+      917
+    ]
+  ]
+}

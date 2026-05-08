@@ -12,7 +12,7 @@ Authority for “what the product must never break” lives in **`AGENTS.md`**, 
 
 ## Operational alignment and precedence
 
-This charter governs **skill evolution** (what may change in a `SKILL.md` and how). Day-to-day coding constraints live in **`.cursor/rules/*.mdc`** and **`docs/repository-layout-policy.md`**.
+This charter governs **skill evolution** (what may change in a `SKILL.md` and how). Day-to-day coding constraints live in **`.cursor/rules/*.mdc`** and **`docs/policy/repository-layout-policy.md`**.
 
 If instructions conflict, use repository precedence (see also **`AGENTS.md`** §9):
 
@@ -20,8 +20,8 @@ If instructions conflict, use repository precedence (see also **`AGENTS.md`** §
 2. **`pyproject.toml`** (packaging, deps, tool config).
 3. **Accepted `docs/adr/*.md`** when they explicitly decide behavior or structure.
 4. **`AGENTS.md`** (governance, freeze zones).
-5. **`docs/METACOMPRESSOR_WORKING_CONTRACT.md`** (working anchor, stay-current checklist).
-6. **`docs/repository-layout-policy.md`** (where files live).
+5. **`docs/policy/METACOMPRESSOR_WORKING_CONTRACT.md`** (working anchor, stay-current checklist).
+6. **`docs/policy/repository-layout-policy.md`** (where files live).
 7. **`.cursor/rules/*.mdc`** (always-on / scoped agent rules).
 8. **`.cursor/skills/*/SKILL.md`** (optional workflows—this layer).
 
@@ -106,7 +106,7 @@ Promotion:
 
 1. Validate against **CI** (`ci.yml`) locally or in PR.
 2. Keep instructions **deterministic** (same commands, same paths from repo root).
-3. Reconcile with **`AGENTS.md`** and **`docs/repository-layout-policy.md`**.
+3. Reconcile with **`AGENTS.md`** and **`docs/policy/repository-layout-policy.md`**.
 4. Merge without contradicting locked freeze semantics.
 
 ## Ambiguity rule

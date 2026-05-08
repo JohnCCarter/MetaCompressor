@@ -1,1 +1,2 @@
-# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+﻿# Ingen indexerings-exkludering: inga mönster nedan ⇒ Cursor/AI kan indexera hela arbetsytan.
+# Lägg till rader här endast om du vill begränsa igen senare (samma syntax som .gitignore, inkl. `!` för undantag).

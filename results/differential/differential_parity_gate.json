@@ -1,0 +1,70 @@
+{
+  "byte_identical_parity_rate": 1.0,
+  "candidate_size_avg": 18227.583333333332,
+  "container_metadata_equal_rate": 1.0,
+  "deterministic_merge_status": "pass",
+  "fallback_reason_counts": {
+    "noisy_fail_closed": 20
+  },
+  "fresh_size_avg": 18237.483333333334,
+  "generated_at": "2026-05-07T16:24:05Z",
+  "mismatch_stage_counts": {
+    "msgpack_structure": 30,
+    "none": 30
+  },
+  "msgpack_structure_equal_rate": 0.5,
+  "noisy_fail_closed_status": "pass",
+  "payload_order_equal_rate": 1.0,
+  "real_decision_metadata_used": true,
+  "returned_archive_source": "fresh_full_build",
+  "run_count": 20,
+  "runtime_experimental": true,
+  "runtime_substitution_fail_reason_counts": {
+    "byte_parity_mismatch": 30
+  },
+  "runtime_substitution_used_rate": 0.45,
+  "simulation_only": false,
+  "size_delta_avg": -9.9,
+  "strategy_encoding_match_rate": 1.0,
+  "suspected_global_dependency_rate": 0.5,
+  "verification_mode": "partial_reuse_runtime_experimental",
+  "workloads": [
+    {
+      "byte_identical_parity_rate": 1.0,
+      "returned_archive_source": "fresh_full_build",
+      "run_count": 20,
+      "runtime_mismatch_first_offset_min": 10,
+      "runtime_mismatch_stage_counts": {
+        "msgpack_structure": 10,
+        "none": 10
+      },
+      "runtime_substitution_enabled": true,
+      "scenario": "append-only"
+    },
+    {
+      "byte_identical_parity_rate": 1.0,
+      "returned_archive_source": "fresh_full_build",
+      "run_count": 20,
+      "runtime_mismatch_first_offset_min": 10,
+      "runtime_mismatch_stage_counts": {
+        "msgpack_structure": 1,
+        "none": 19
+      },
+      "runtime_substitution_enabled": true,
+      "scenario": "small-change"
+    },
+    {
+      "byte_identical_parity_rate": 1.0,
+      "returned_archive_source": "fresh_full_build",
+      "run_count": 20,
+      "runtime_mismatch_first_offset_min": 10,
+      "runtime_mismatch_stage_counts": {
+        "msgpack_structure": 19,
+        "none": 1
+      },
+      "runtime_substitution_enabled": true,
+      "scenario": "noisy-change"
+    }
+  ],
+  "zstd_frame_equal_rate": 0.5
+}
