@@ -71,6 +71,14 @@ Ranking basis:
 - **Validation status:** `pytest` `317 passed, 8 skipped`; `ruff` and `black --check` passed.
 - **Risk note:** cache memory growth is bounded by `maxsize=131072` (eviction after bound is reached).
 
+### Hotpath optimization history
+
+See `docs/template-hotpath-optimization-summary.md` for the consolidated history of accepted template/tokenization hotpath wins, rejected candidates that were reverted, and current status.
+
+- Accepted hotpath micro-opts produced practical speedups while preserving output/mode/correctness/determinism gates.
+- Rejected candidates were explicitly reverted when median gates failed.
+- Current recommendation: pause further tokenization micro-opts until new profiler evidence appears; shift focus toward ZSTD-affine shaping or higher-level build-path profiling.
+
 ## 5) ZSTD-affine shaping
 
 - **Current evidence:** Shaping has been treated as experimental/report-only. Recent runtime parity analysis indicates global assembly sensitivity, so compression-shape perturbations must be very controlled.
