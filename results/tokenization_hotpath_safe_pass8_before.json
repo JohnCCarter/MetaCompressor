@@ -1,0 +1,56 @@
+{
+  "dataset": "structured_scale_100mb",
+  "median": {
+    "mc_selected_build_time_ms": 106961,
+    "output_size_bytes": 11819419,
+    "template_cache_lookup_time_ms": 168,
+    "template_extract_time_ms": 40260,
+    "template_grouping_time_ms": 748,
+    "template_hash_time_ms": 511,
+    "tokenization_time_ms": 32895,
+    "transform_call_time_ms": 91238
+  },
+  "phase": "before",
+  "replicates": 3,
+  "runs": [
+    {
+      "mc_selected_build_time_ms": 120907,
+      "output_size_bytes": 11819419,
+      "replicate": 1,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 165,
+      "template_extract_time_ms": 51017,
+      "template_grouping_time_ms": 834,
+      "template_hash_time_ms": 562,
+      "tokenization_time_ms": 37570,
+      "transform_call_time_ms": 104500
+    },
+    {
+      "mc_selected_build_time_ms": 106961,
+      "output_size_bytes": 11819419,
+      "replicate": 2,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 168,
+      "template_extract_time_ms": 39922,
+      "template_grouping_time_ms": 748,
+      "template_hash_time_ms": 490,
+      "tokenization_time_ms": 32534,
+      "transform_call_time_ms": 91238
+    },
+    {
+      "mc_selected_build_time_ms": 104061,
+      "output_size_bytes": 11819419,
+      "replicate": 3,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 182,
+      "template_extract_time_ms": 40260,
+      "template_grouping_time_ms": 714,
+      "template_hash_time_ms": 511,
+      "tokenization_time_ms": 32895,
+      "transform_call_time_ms": 89336
+    }
+  ],
+  "selected_mode_set": [
+    "corpus_template_columnar_v2"
+  ]
+}

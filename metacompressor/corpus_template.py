@@ -806,17 +806,24 @@ def _tokenize_one_file(
                 placeholder_detection_s += time.perf_counter() - t_placeholder_start
             t_hash_start = time.perf_counter()
             tkey = analysis.template_parts
-            file_tpl_count[tkey] = file_tpl_count.get(tkey, 0) + 1
+            try:
+                file_tpl_count[tkey] += 1
+            except KeyError:
+                file_tpl_count[tkey] = 1
             template_hash_s += time.perf_counter() - t_hash_start
             t_group_start = time.perf_counter()
-            file_normalized_tpl_count[analysis.normalized_skeleton] = (
-                file_normalized_tpl_count.get(analysis.normalized_skeleton, 0) + 1
-            )
+            normalized_key = analysis.normalized_skeleton
+            try:
+                file_normalized_tpl_count[normalized_key] += 1
+            except KeyError:
+                file_normalized_tpl_count[normalized_key] = 1
             if analysis.is_json:
                 file_json_lines += 1
-                file_json_template_keys[analysis.json_structure_key] = (
-                    file_json_template_keys.get(analysis.json_structure_key, 0) + 1
-                )
+                json_key = analysis.json_structure_key
+                try:
+                    file_json_template_keys[json_key] += 1
+                except KeyError:
+                    file_json_template_keys[json_key] = 1
             template_grouping_s += time.perf_counter() - t_group_start
         return (
             rel,

@@ -1,0 +1,58 @@
+{
+  "correctness_ok": true,
+  "dataset": "structured_scale_100mb",
+  "determinism_ok": true,
+  "median": {
+    "mc_selected_build_time_ms": 96229,
+    "output_size_bytes": 11819419,
+    "template_cache_lookup_time_ms": 139,
+    "template_extract_time_ms": 33286,
+    "template_grouping_time_ms": 656,
+    "template_hash_time_ms": 446,
+    "tokenization_time_ms": 29064,
+    "transform_call_time_ms": 82306
+  },
+  "phase": "after",
+  "replicates": 3,
+  "runs": [
+    {
+      "mc_selected_build_time_ms": 95077,
+      "output_size_bytes": 11819419,
+      "replicate": 1,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 158,
+      "template_extract_time_ms": 33286,
+      "template_grouping_time_ms": 687,
+      "template_hash_time_ms": 454,
+      "tokenization_time_ms": 30593,
+      "transform_call_time_ms": 82306
+    },
+    {
+      "mc_selected_build_time_ms": 96229,
+      "output_size_bytes": 11819419,
+      "replicate": 2,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 138,
+      "template_extract_time_ms": 31320,
+      "template_grouping_time_ms": 656,
+      "template_hash_time_ms": 440,
+      "tokenization_time_ms": 29064,
+      "transform_call_time_ms": 81655
+    },
+    {
+      "mc_selected_build_time_ms": 103148,
+      "output_size_bytes": 11819419,
+      "replicate": 3,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_cache_lookup_time_ms": 139,
+      "template_extract_time_ms": 34503,
+      "template_grouping_time_ms": 654,
+      "template_hash_time_ms": 446,
+      "tokenization_time_ms": 28992,
+      "transform_call_time_ms": 86347
+    }
+  ],
+  "selected_mode_set": [
+    "corpus_template_columnar_v2"
+  ]
+}
