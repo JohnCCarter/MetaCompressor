@@ -97,6 +97,7 @@ import time
 from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from functools import lru_cache
 from multiprocessing import resource_tracker, shared_memory
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -334,6 +335,7 @@ def _tokenize_legacy(line: str) -> Tuple[Tuple[str, ...], List[str]]:
     return tuple(parts[0::2]), list(parts[1::2])
 
 
+@lru_cache(maxsize=131072)
 def _normalize_text_part(part: str) -> str:
     """Collapse weakly-structured literal variation for conservative grouping."""
     part = _WHITESPACE_RE.sub(" ", part.strip().lower())
