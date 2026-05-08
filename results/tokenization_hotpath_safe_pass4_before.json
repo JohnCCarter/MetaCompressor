@@ -1,0 +1,44 @@
+{
+  "dataset": "structured_scale_100mb",
+  "median": {
+    "mc_selected_build_time_ms": 124444,
+    "output_size_bytes": 11819419,
+    "template_extract_time_ms": 50297,
+    "tokenization_time_ms": 34542,
+    "transform_call_time_ms": 107792
+  },
+  "phase": "before",
+  "replicates": 3,
+  "runs": [
+    {
+      "mc_selected_build_time_ms": 131460,
+      "output_size_bytes": 11819419,
+      "replicate": 1,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_extract_time_ms": 50297,
+      "tokenization_time_ms": 34542,
+      "transform_call_time_ms": 117427
+    },
+    {
+      "mc_selected_build_time_ms": 122295,
+      "output_size_bytes": 11819419,
+      "replicate": 2,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_extract_time_ms": 48486,
+      "tokenization_time_ms": 34182,
+      "transform_call_time_ms": 103657
+    },
+    {
+      "mc_selected_build_time_ms": 124444,
+      "output_size_bytes": 11819419,
+      "replicate": 3,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_extract_time_ms": 53846,
+      "tokenization_time_ms": 38406,
+      "transform_call_time_ms": 107792
+    }
+  ],
+  "selected_mode_set": [
+    "corpus_template_columnar_v2"
+  ]
+}

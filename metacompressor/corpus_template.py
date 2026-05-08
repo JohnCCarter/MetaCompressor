@@ -570,33 +570,33 @@ def _find_next_variable_legacy(line: str, start: int) -> Optional[Tuple[int, int
 def _find_next_variable(line: str, start: int) -> Optional[Tuple[int, int, str]]:
     global _PROFILE_REGEX_APPLY_TIME_S, _PROFILE_REGEX_APPLY_COUNT
     t_apply_start = time.perf_counter()
-    best: Optional[Tuple[int, int, str]] = None
-
+    best_start = -1
+    best_end = -1
+    best_kind: Optional[str] = None
     key_match = _KEY_VALUE_RE.search(line, start)
     if key_match is not None:
-        best = (
-            key_match.start("value"),
-            key_match.end("value"),
-            "kv:%s" % key_match.group("key").lower(),
-        )
+        best_start = key_match.start("value")
+        best_end = key_match.end("value")
+        best_kind = "kv:%s" % key_match.group("key").lower()
 
     generic_match = _COMBINED_VAR_RE.search(line, start)
     if generic_match is not None:
-        candidate = (
-            generic_match.start(),
-            generic_match.end(),
-            generic_match.lastgroup,
-        )
+        candidate_start = generic_match.start()
+        candidate_end = generic_match.end()
         if (
-            best is None
-            or candidate[0] < best[0]
-            or (candidate[0] == best[0] and candidate[1] > best[1])
+            best_kind is None
+            or candidate_start < best_start
+            or (candidate_start == best_start and candidate_end > best_end)
         ):
-            best = candidate
+            best_start = candidate_start
+            best_end = candidate_end
+            best_kind = generic_match.lastgroup
 
     _PROFILE_REGEX_APPLY_TIME_S += time.perf_counter() - t_apply_start
     _PROFILE_REGEX_APPLY_COUNT += 1
-    return best
+    if best_kind is None:
+        return None
+    return best_start, best_end, best_kind
 
 
 def _scan_text_line(line: str) -> _LineAnalysis:
