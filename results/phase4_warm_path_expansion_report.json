@@ -1,0 +1,98 @@
+{
+  "dataset": "structured_scale_100mb",
+  "phase": "phase4_warm_path_decision_reuse_expansion",
+  "recommended_next": "expand safe eligibility only where receipt metadata + manifest integrity match; keep fail-closed on stale/low-confidence/mismatch states",
+  "scenarios": [
+    {
+      "analysis_skip_denied_reason": "stale_or_missing_receipt",
+      "analysis_skip_eligible": false,
+      "analysis_skip_used": false,
+      "decision_kernel_total_time_ms": 150627,
+      "output_size_bytes": 11819419,
+      "receipt_used": false,
+      "receipt_valid": false,
+      "scenario": "cold_first_run",
+      "selected_mode": "corpus_template_columnar_v2",
+      "total_quick_time_ms": 150627,
+      "warm_path_used": false
+    },
+    {
+      "analysis_skip_denied_reason": "",
+      "analysis_skip_eligible": true,
+      "analysis_skip_used": true,
+      "decision_kernel_total_time_ms": 147819,
+      "output_size_bytes": 11819419,
+      "receipt_used": true,
+      "receipt_valid": true,
+      "scenario": "warm_unchanged",
+      "selected_mode": "corpus_template_columnar_v2",
+      "total_quick_time_ms": 147819,
+      "warm_path_used": true
+    },
+    {
+      "analysis_skip_denied_reason": "stale_or_missing_receipt",
+      "analysis_skip_eligible": false,
+      "analysis_skip_used": false,
+      "decision_kernel_total_time_ms": 148792,
+      "output_size_bytes": 11901743,
+      "receipt_used": false,
+      "receipt_valid": false,
+      "scenario": "changed_dataset",
+      "selected_mode": "corpus_template_columnar_v2",
+      "total_quick_time_ms": 148792,
+      "warm_path_used": false
+    },
+    {
+      "analysis_skip_denied_reason": "stale_or_missing_receipt",
+      "analysis_skip_eligible": false,
+      "analysis_skip_used": false,
+      "decision_kernel_total_time_ms": 143221,
+      "output_size_bytes": 11819419,
+      "receipt_used": false,
+      "receipt_valid": false,
+      "scenario": "rebaseline_after_change",
+      "selected_mode": "corpus_template_columnar_v2",
+      "total_quick_time_ms": 143221,
+      "warm_path_used": false
+    },
+    {
+      "analysis_skip_denied_reason": "stale_or_missing_receipt",
+      "analysis_skip_eligible": false,
+      "analysis_skip_used": false,
+      "decision_kernel_total_time_ms": 162957,
+      "output_size_bytes": 11819419,
+      "receipt_used": false,
+      "receipt_valid": false,
+      "scenario": "stale_receipt",
+      "selected_mode": "corpus_template_columnar_v2",
+      "total_quick_time_ms": 162957,
+      "warm_path_used": false
+    },
+    {
+      "analysis_skip_denied_reason": "low_confidence",
+      "analysis_skip_eligible": false,
+      "analysis_skip_used": false,
+      "decision_kernel_total_time_ms": 200733,
+      "output_size_bytes": 11819419,
+      "receipt_used": false,
+      "receipt_valid": true,
+      "scenario": "low_confidence_receipt",
+      "selected_mode": "corpus_template_columnar_v2",
+      "total_quick_time_ms": 200733,
+      "warm_path_used": false
+    },
+    {
+      "analysis_skip_denied_reason": "receipt_metadata_mismatch",
+      "analysis_skip_eligible": false,
+      "analysis_skip_used": false,
+      "decision_kernel_total_time_ms": 187361,
+      "output_size_bytes": 11819419,
+      "receipt_used": false,
+      "receipt_valid": true,
+      "scenario": "receipt_metadata_mismatch",
+      "selected_mode": "corpus_template_columnar_v2",
+      "total_quick_time_ms": 187361,
+      "warm_path_used": false
+    }
+  ]
+}

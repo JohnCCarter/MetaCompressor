@@ -1,0 +1,118 @@
+{
+  "datasets_evaluated": [
+    "structured_scale_100mb",
+    "app_service_logs",
+    "json_ndjson_logs",
+    "many_small_files_5000"
+  ],
+  "phase": "phase2_zstd_affine_research_report_only",
+  "ranked_for_candidate": [
+    {
+      "candidate_count": 6,
+      "dataset": "json_ndjson_logs",
+      "encode_time_ms": 9592,
+      "ratio_delta_vs_tar_zstd_pct": -44.471,
+      "zstd_affinity_score": 0.5421603491868808
+    },
+    {
+      "candidate_count": 4,
+      "dataset": "many_small_files_5000",
+      "encode_time_ms": 11997,
+      "ratio_delta_vs_tar_zstd_pct": -39.9,
+      "zstd_affinity_score": 0.4011811181234406
+    },
+    {
+      "candidate_count": 4,
+      "dataset": "app_service_logs",
+      "encode_time_ms": 9424,
+      "ratio_delta_vs_tar_zstd_pct": -47.786,
+      "zstd_affinity_score": 0.40025810586302357
+    },
+    {
+      "candidate_count": 4,
+      "dataset": "structured_scale_100mb",
+      "encode_time_ms": 138326,
+      "ratio_delta_vs_tar_zstd_pct": -49.223,
+      "zstd_affinity_score": 0.40022923071214855
+    }
+  ],
+  "recommendation_reason": "highest zstd_affinity_score with meaningful encode-time headroom; report-only, no runtime shaping applied",
+  "recommended_candidate": "column_locality",
+  "recommended_candidate_dataset": "json_ndjson_logs",
+  "rows": [
+    {
+      "dataset": "structured_scale_100mb",
+      "decode_time_ms": 1996,
+      "encode_time_ms": 138326,
+      "expected_zstd_benefit_reason": "moderate_affinity_only_selective_shaping_likely_to_help",
+      "mc_size": 11819419,
+      "ratio_delta_vs_tar_zstd_pct": -49.223,
+      "selected_mode": "corpus_template_columnar_v2",
+      "shaping_candidates": [
+        "dictionary_token_substitution",
+        "repeated_structural_markers",
+        "stable_field_ordering",
+        "template_grouping"
+      ],
+      "tar_zstd_size": 23277190,
+      "unsafe_to_shape_reason": "insufficient_affinity_for_confident_shaping_without_risk",
+      "zstd_affinity_score": 0.40022923071214855
+    },
+    {
+      "dataset": "app_service_logs",
+      "decode_time_ms": 233,
+      "encode_time_ms": 9424,
+      "expected_zstd_benefit_reason": "moderate_affinity_only_selective_shaping_likely_to_help",
+      "mc_size": 1455114,
+      "ratio_delta_vs_tar_zstd_pct": -47.786,
+      "selected_mode": "corpus_template_columnar_v2",
+      "shaping_candidates": [
+        "dictionary_token_substitution",
+        "repeated_structural_markers",
+        "stable_field_ordering",
+        "template_grouping"
+      ],
+      "tar_zstd_size": 2786801,
+      "unsafe_to_shape_reason": "insufficient_affinity_for_confident_shaping_without_risk",
+      "zstd_affinity_score": 0.40025810586302357
+    },
+    {
+      "dataset": "json_ndjson_logs",
+      "decode_time_ms": 210,
+      "encode_time_ms": 9592,
+      "expected_zstd_benefit_reason": "moderate_affinity_only_selective_shaping_likely_to_help",
+      "mc_size": 1528432,
+      "ratio_delta_vs_tar_zstd_pct": -44.471,
+      "selected_mode": "corpus_template_columnar_v2",
+      "shaping_candidates": [
+        "column_locality",
+        "delta_friendly_numeric_lanes",
+        "dictionary_token_substitution",
+        "repeated_structural_markers",
+        "stable_field_ordering",
+        "template_grouping"
+      ],
+      "tar_zstd_size": 2752514,
+      "unsafe_to_shape_reason": "insufficient_affinity_for_confident_shaping_without_risk",
+      "zstd_affinity_score": 0.5421603491868808
+    },
+    {
+      "dataset": "many_small_files_5000",
+      "decode_time_ms": 4290,
+      "encode_time_ms": 11997,
+      "expected_zstd_benefit_reason": "moderate_affinity_only_selective_shaping_likely_to_help",
+      "mc_size": 65436,
+      "ratio_delta_vs_tar_zstd_pct": -39.9,
+      "selected_mode": "corpus_template_columnar_v2",
+      "shaping_candidates": [
+        "dictionary_token_substitution",
+        "repeated_structural_markers",
+        "stable_field_ordering",
+        "template_grouping"
+      ],
+      "tar_zstd_size": 108879,
+      "unsafe_to_shape_reason": "insufficient_affinity_for_confident_shaping_without_risk",
+      "zstd_affinity_score": 0.4011811181234406
+    }
+  ]
+}

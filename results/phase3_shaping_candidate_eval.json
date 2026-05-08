@@ -1,0 +1,115 @@
+{
+  "candidate": "column_locality_raw_line_order",
+  "dataset": "json_ndjson_logs",
+  "delta_on_minus_off": {
+    "decode_time_ms": -69,
+    "encode_time_ms": -1943,
+    "size_bytes": 0
+  },
+  "keep_candidate": false,
+  "off": {
+    "enabled": false,
+    "fallback_reasons": [
+      ""
+    ],
+    "median": {
+      "decode_time_ms": 271,
+      "encode_time_ms": 10687,
+      "shaping_saved_bytes": 0,
+      "size_bytes": 1528432,
+      "tar_size_bytes": 2752514
+    },
+    "runs": [
+      {
+        "decode_time_ms": 245,
+        "encode_time_ms": 10687,
+        "replicate": 1,
+        "selected_mode": "corpus_template_columnar_v2",
+        "shaping_fallback_reason": "",
+        "shaping_saved_bytes": 0,
+        "shaping_used": false,
+        "size_bytes": 1528432,
+        "tar_size_bytes": 2752514
+      },
+      {
+        "decode_time_ms": 271,
+        "encode_time_ms": 10534,
+        "replicate": 2,
+        "selected_mode": "corpus_template_columnar_v2",
+        "shaping_fallback_reason": "",
+        "shaping_saved_bytes": 0,
+        "shaping_used": false,
+        "size_bytes": 1528432,
+        "tar_size_bytes": 2752514
+      },
+      {
+        "decode_time_ms": 287,
+        "encode_time_ms": 10719,
+        "replicate": 3,
+        "selected_mode": "corpus_template_columnar_v2",
+        "shaping_fallback_reason": "",
+        "shaping_saved_bytes": 0,
+        "shaping_used": false,
+        "size_bytes": 1528432,
+        "tar_size_bytes": 2752514
+      }
+    ],
+    "selected_mode_set": [
+      "corpus_template_columnar_v2"
+    ],
+    "shaping_used_count": 0
+  },
+  "on": {
+    "enabled": true,
+    "fallback_reasons": [
+      ""
+    ],
+    "median": {
+      "decode_time_ms": 202,
+      "encode_time_ms": 8744,
+      "shaping_saved_bytes": 0,
+      "size_bytes": 1528432,
+      "tar_size_bytes": 2752514
+    },
+    "runs": [
+      {
+        "decode_time_ms": 202,
+        "encode_time_ms": 10476,
+        "replicate": 1,
+        "selected_mode": "corpus_template_columnar_v2",
+        "shaping_fallback_reason": "",
+        "shaping_saved_bytes": 0,
+        "shaping_used": false,
+        "size_bytes": 1528432,
+        "tar_size_bytes": 2752514
+      },
+      {
+        "decode_time_ms": 200,
+        "encode_time_ms": 8528,
+        "replicate": 2,
+        "selected_mode": "corpus_template_columnar_v2",
+        "shaping_fallback_reason": "",
+        "shaping_saved_bytes": 0,
+        "shaping_used": false,
+        "size_bytes": 1528432,
+        "tar_size_bytes": 2752514
+      },
+      {
+        "decode_time_ms": 212,
+        "encode_time_ms": 8744,
+        "replicate": 3,
+        "selected_mode": "corpus_template_columnar_v2",
+        "shaping_fallback_reason": "",
+        "shaping_saved_bytes": 0,
+        "shaping_used": false,
+        "size_bytes": 1528432,
+        "tar_size_bytes": 2752514
+      }
+    ],
+    "selected_mode_set": [
+      "corpus_template_columnar_v2"
+    ],
+    "shaping_used_count": 0
+  },
+  "phase": "phase3_single_safe_shaping_experiment"
+}

@@ -1,0 +1,128 @@
+{
+  "dataset": "structured_scale_100mb",
+  "median_ms": {
+    "columnar_detection_time_ms": 35459,
+    "determinism_verify_time_ms": 29730,
+    "final_pack_time_ms": 14121,
+    "input_walk_time_ms": 2,
+    "mc_selected_build_time_ms": 133587,
+    "mc_selected_serialize_time_ms": 14121,
+    "mc_selected_zstd_time_ms": 0,
+    "memory_copy_materialization_time_ms": 0,
+    "msgpack_object_build_time_ms": 14121,
+    "output_size_bytes": 11819419,
+    "row_model_build_time_ms": 6044,
+    "template_extract_time_ms": 45186,
+    "transform_call_time_ms": 105108
+  },
+  "phase": "phase1_higher_level_build_profiling",
+  "ranked_costs_ms": [
+    [
+      "mc_selected_build_time_ms",
+      133587
+    ],
+    [
+      "transform_call_time_ms",
+      105108
+    ],
+    [
+      "template_extract_time_ms",
+      45186
+    ],
+    [
+      "columnar_detection_time_ms",
+      35459
+    ],
+    [
+      "determinism_verify_time_ms",
+      29730
+    ],
+    [
+      "msgpack_object_build_time_ms",
+      14121
+    ],
+    [
+      "mc_selected_serialize_time_ms",
+      14121
+    ],
+    [
+      "final_pack_time_ms",
+      14121
+    ],
+    [
+      "row_model_build_time_ms",
+      6044
+    ],
+    [
+      "input_walk_time_ms",
+      2
+    ],
+    [
+      "mc_selected_zstd_time_ms",
+      0
+    ],
+    [
+      "memory_copy_materialization_time_ms",
+      0
+    ]
+  ],
+  "recommended_reason": "largest repeatable non-verification build-layer cost in 3x median profile",
+  "recommended_safe_target": "transform_call_time_ms",
+  "replicates": 3,
+  "runs": [
+    {
+      "columnar_detection_time_ms": 35459,
+      "determinism_verify_time_ms": 25655,
+      "final_pack_time_ms": 14121,
+      "input_walk_time_ms": 2,
+      "mc_selected_build_time_ms": 133587,
+      "mc_selected_serialize_time_ms": 14121,
+      "mc_selected_zstd_time_ms": 0,
+      "memory_copy_materialization_time_ms": 0,
+      "msgpack_object_build_time_ms": 14121,
+      "output_size_bytes": 11819419,
+      "replicate": 1,
+      "row_model_build_time_ms": 6361,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_extract_time_ms": 59692,
+      "transform_call_time_ms": 119928
+    },
+    {
+      "columnar_detection_time_ms": 32462,
+      "determinism_verify_time_ms": 46427,
+      "final_pack_time_ms": 13911,
+      "input_walk_time_ms": 4,
+      "mc_selected_build_time_ms": 137492,
+      "mc_selected_serialize_time_ms": 13911,
+      "mc_selected_zstd_time_ms": 0,
+      "memory_copy_materialization_time_ms": 0,
+      "msgpack_object_build_time_ms": 13911,
+      "output_size_bytes": 11819419,
+      "replicate": 2,
+      "row_model_build_time_ms": 5439,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_extract_time_ms": 45186,
+      "transform_call_time_ms": 102376
+    },
+    {
+      "columnar_detection_time_ms": 38515,
+      "determinism_verify_time_ms": 29730,
+      "final_pack_time_ms": 15946,
+      "input_walk_time_ms": 2,
+      "mc_selected_build_time_ms": 121300,
+      "mc_selected_serialize_time_ms": 15946,
+      "mc_selected_zstd_time_ms": 0,
+      "memory_copy_materialization_time_ms": 0,
+      "msgpack_object_build_time_ms": 15946,
+      "output_size_bytes": 11819419,
+      "replicate": 3,
+      "row_model_build_time_ms": 6044,
+      "selected_mode": "corpus_template_columnar_v2",
+      "template_extract_time_ms": 44762,
+      "transform_call_time_ms": 105108
+    }
+  ],
+  "selected_mode_set": [
+    "corpus_template_columnar_v2"
+  ]
+}
