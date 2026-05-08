@@ -740,7 +740,10 @@ def _tokenize_one_file(
             if legacy_needed:
                 if line not in local_legacy_tok_cache:
                     local_legacy_tok_cache[line] = _tokenize_legacy(line)
-                legacy_tkey = local_legacy_tok_cache[line][0]
+                legacy_template_parts, legacy_values_cached = local_legacy_tok_cache[
+                    line
+                ]
+                legacy_tkey = legacy_template_parts
                 file_legacy_tpl_count[legacy_tkey] = (
                     file_legacy_tpl_count.get(legacy_tkey, 0) + 1
                 )
@@ -760,16 +763,14 @@ def _tokenize_one_file(
                     _analyze_line(line)
                     if structure_v2_enabled
                     else _LineAnalysis(
-                        template_parts=local_legacy_tok_cache[line][0],
-                        values=list(local_legacy_tok_cache[line][1]),
+                        template_parts=legacy_template_parts,
+                        values=list(legacy_values_cached),
                         normalized_skeleton=_normalized_skeleton(
-                            local_legacy_tok_cache[line][0],
-                            tuple("legacy" for _ in local_legacy_tok_cache[line][1]),
+                            legacy_template_parts,
+                            ("legacy",) * len(legacy_values_cached),
                             (),
                         ),
-                        value_kinds=tuple(
-                            "legacy" for _ in local_legacy_tok_cache[line][1]
-                        ),
+                        value_kinds=("legacy",) * len(legacy_values_cached),
                         is_json=False,
                         json_structure_key=(),
                     )
