@@ -81,3 +81,5 @@ class TestCompareDirOutput:
         assert "Adoption summary" in output
         assert "Selected path" in output
         assert "Safe fallback" in output
+        assert "Fallback reasons" in output
+        assert "Workload guidance" in output

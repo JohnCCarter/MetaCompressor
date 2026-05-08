@@ -224,6 +224,37 @@ def _fallback_summary(metrics: dict) -> str:
     return f"{top_reason} ({counts[top_reason]})"
 
 
+def _fallback_reason_labels(metrics: dict) -> str:
+    """Return human-readable fallback reasons with stable ordering."""
+    counts = metrics.get("fallback_reason_counts", {}) or {}
+    if not counts:
+        return "none"
+    label_map = {
+        "raw_tar_zstd": "raw_tar_zstd_threshold_exceeded",
+        "low_structure": "low_structure",
+        "no_templates": "no_templates",
+        "binary": "binary",
+    }
+    parts = []
+    for key in sorted(counts):
+        label = label_map.get(key, key)
+        parts.append(f"{label}:{counts[key]}")
+    return ", ".join(parts)
+
+
+def _workload_guidance(metrics: dict) -> str:
+    """Return concise workload-fit guidance for compare-dir output."""
+    reuse_rate = float(metrics.get("template_reuse_rate", 0.0))
+    fallback_counts = metrics.get("fallback_reason_counts", {}) or {}
+    low_structure = int(fallback_counts.get("low_structure", 0))
+    no_templates = int(fallback_counts.get("no_templates", 0))
+    if reuse_rate >= 0.75 and low_structure == 0 and no_templates == 0:
+        return "strong_fit_structured_repetitive_corpus"
+    if low_structure > 0 or no_templates > 0:
+        return "mixed_or_low_structure_fallback_expected"
+    return "moderate_fit_validate_against_tar_zstd_baseline"
+
+
 def cmd_compare_dir(args: argparse.Namespace) -> None:
     """Compare MC corpus / corpus-template / per-file ZSTD / TAR+ZSTD on a directory."""
     input_dir = Path(args.input_dir)
@@ -359,6 +390,8 @@ def cmd_compare_dir(args: argparse.Namespace) -> None:
         f"  Safe fallback       : {'yes' if metrics.get('chose_raw_fallback') else 'no'}"
     )
     print(f"  Fallback summary    : {_fallback_summary(metrics)}")
+    print(f"  Fallback reasons    : {_fallback_reason_labels(metrics)}")
+    print(f"  Workload guidance   : {_workload_guidance(metrics)}")
 
 
 def build_parser() -> argparse.ArgumentParser:
